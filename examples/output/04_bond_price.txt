@@ -1,33 +1,34 @@
-══ fincurve 刻画报告：曲线模式（债券价格 对 到期收益率 (%)）══
-【数据画像】
-· 样本 30 个
-· y：正的连续值，范围 [59.87, 138]
-· 形状：单调下降，斜率大致不变；局部平滑能解释 100% 的变化
-· 噪声：大致恒定；x 等间距
-【自动选择】
-· 误差模型：加性误差（正态）——y 为正但跨度不大、噪声大致恒定，用加性误差
-· 验证方式：随机 K 折，5 次切分——数据没有时间顺序
-· 候选：比较了 32 个函数
-【排名】（ΔCV-NLL = 与最优模型相比、每个观测的留出负对数似然之差；★ 推荐；= 与最优的差距在 2 个标准误以内）
-★ 1. 指数趋近                    k= 4  ΔCV-NLL=       0 ±0       CV-RMSE=   0.125  ΔAIC=    0.0
-= 2. Nelson–Siegel           k= 5  ΔCV-NLL=  0.0197 ±0.012   CV-RMSE=   0.127  ΔAIC=    1.9
-= 3. 现金流贴现价格                 k= 4  ΔCV-NLL=   0.021 ±0.029   CV-RMSE=   0.127  ΔAIC=    1.0
-= 4. SVI 微笑                  k= 6  ΔCV-NLL=  0.0331 ±0.058   CV-RMSE=   0.126  ΔAIC=    2.4
-  5. 双指数                     k= 6  ΔCV-NLL=  0.0405 ±0.017   CV-RMSE=   0.129  ΔAIC=    4.0
-= 6. Svensson                k= 7  ΔCV-NLL=   0.047 ±0.066   CV-RMSE=   0.127  ΔAIC=    2.8
-= 7. 三次                      k= 5  ΔCV-NLL=  0.0553 ±0.036   CV-RMSE=   0.132  ΔAIC=    4.3
-= 8. 平滑曲棍球杆                  k= 6  ΔCV-NLL=  0.0711 ±0.037   CV-RMSE=   0.134  ΔAIC=    7.2
-  9. Hill 饱和                 k= 5  ΔCV-NLL=   0.194 ±0.073   CV-RMSE=    0.15  ΔAIC=   10.1
- 10. Black–Scholes 期权形状      k= 5  ΔCV-NLL=     0.2 ±0.079   CV-RMSE=   0.151  ΔAIC=   11.0
-【推荐】
-· 指数趋近［加性误差（正态）］：c + a·e^(−κ·u)
-· 含义：均值回复、向长期水平收敛（波动率/利差期限结构）
-· 参数：c = 16.49，a = 121.4，κ = 1.031（u = (x − 最小值)/全距）
-· 理由：交叉验证分数最优，且与其并列的 6 个模型参数都不比它少；样本内 R² = 1
-【需要注意】
-· 并列模型分属不同类型（指数增长/衰减、期限结构、固定收益、波动率、多项式、分段/拐点）：数据本身区分不了这些含义不同的形状，要结合经济含义选择，或补充 x 范围更宽的数据
-【备注】
-· 与最优模型没有实质差距的共有 7 个：指数趋近、Nelson–Siegel、现金流贴现价格、SVI 微笑、Svensson、三次、平滑曲棍球杆
-· x 的名字提示这是价格–收益率关系：该语境的专用形式“现金流贴现价格”排第 3（与最优没有实质差距）。专用形式的参数有明确经济含义，差距不大时可以优先使用
+== fincurve report: curve mode (bond price vs yield to maturity (%)) ==
+[Data profile]
+  - 30 observations
+  - y: positive continuous value, range [59.87, 138]
+  - shape: decreasing, roughly constant slope; a local smoother explains 100% of the variation
+  - noise: roughly constant; x is equally spaced
+[Automatic choices]
+  - error model: additive errors (Gaussian) — y is positive with a narrow range and constant noise: additive errors
+  - validation: shuffled K-fold, 5 splits — no time ordering
+  - candidates: 32 fitted
+[Ranking]  ΔCV-NLL = held-out negative log-likelihood per row relative to the best model;
+           * recommended, = practically tied with the best (within 2 paired SE and 0.1 nats)
+* 1. Exponential approach                        k= 4  ΔCV-NLL=        0 ±0        CV-RMSE=   0.125  ΔAIC=    0.0
+= 2. Nelson–Siegel                               k= 5  ΔCV-NLL=   0.0197 ±0.012    CV-RMSE=   0.127  ΔAIC=    1.9
+= 3. DCF price                                   k= 4  ΔCV-NLL=    0.021 ±0.029    CV-RMSE=   0.127  ΔAIC=    1.0
+= 4. Svensson                                    k= 7  ΔCV-NLL=   0.0237 ±0.059    CV-RMSE=   0.125  ΔAIC=    2.8
+= 5. SVI smile                                   k= 6  ΔCV-NLL=   0.0238 ±0.055    CV-RMSE=   0.126  ΔAIC=    2.4
+= 6. Cubic                                       k= 5  ΔCV-NLL=   0.0553 ±0.036    CV-RMSE=   0.132  ΔAIC=    4.3
+= 7. Soft hockey stick                           k= 6  ΔCV-NLL=   0.0711 ±0.037    CV-RMSE=   0.134  ΔAIC=    7.2
+  8. Hill saturation                             k= 5  ΔCV-NLL=    0.194 ±0.073    CV-RMSE=    0.15  ΔAIC=   10.1
+  9. Black–Scholes shape                         k= 5  ΔCV-NLL=      0.2 ±0.079    CV-RMSE=   0.151  ΔAIC=   11.0
+ 10. Gompertz                                    k= 5  ΔCV-NLL=    0.419 ±0.2      CV-RMSE=    0.19  ΔAIC=   27.5
+[Recommendation]
+  - Exponential approach [additive errors (Gaussian)]: c + a·e^(−κ·u)
+  - meaning: mean reversion to a long-run level (vol and spread term structures)
+  - parameters: c = 16.49, a = 121.4, κ = 1.031 (u = (x − min) / range)
+  - why: best cross-validated score, and none of the 6 tied models has fewer parameters; in-sample R² = 1
+[Warnings]
+  - the tied models belong to different families (growth / decay, term structure, fixed income, volatility, polynomial, piecewise / kink): the data cannot tell these shapes apart — choose on economic grounds or collect a wider x range
+[Notes]
+  - 7 models are practically tied with the best: Exponential approach, Nelson–Siegel, DCF price, Svensson, SVI smile, Cubic, Soft hockey stick
+  - the name of x suggests a price–yield relationship: the specialised form 'DCF price' ranks #3 (practically tied with the best). Its parameters have a direct economic meaning, so prefer it when the gap is small
 
-（耗时 3.6 秒）
+(elapsed 1.1s)

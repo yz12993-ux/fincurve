@@ -1,26 +1,27 @@
-══ fincurve 刻画报告：多特征模式（信用利差 (bp) 对 5 个特征）══
-【数据画像】
-· 样本 1500 个；y：正的连续值
-· 特征：2 个数值特征，2 个类别特征，1 个剔除的特征
-【自动选择】
-· 误差模型：乘性误差（对数正态）——y 为正：线性基准下乘性误差（对数正态）的 AIC 低 2610.9，因此选用它
-· 验证方式：随机 K 折，5 次切分——数据没有时间顺序
-· 形状搜索：每个数值特征从线性、二次、三次、对数、平方根、反比、幂律、指数、S 形、单峰、折线中选择，AIC 至少下降 4 才换形状；交互项 AIC 至少下降 10 才加入
-· 交叉验证在每一折里重新选择形状（嵌套），分数没有被形状搜索美化
-【排名】（ΔCV-NLL = 与最优模型相比、每个观测的留出负对数似然之差；★ 推荐；= 与最优的差距在 2 个标准误以内）
-★ 1. 加性形状模型                  k=11  ΔCV-NLL=       0 ±0       CV-RMSE=    62.1  ΔAIC=    0.0
-  2. 全线性（GLM 基准）             k= 9  ΔCV-NLL=  0.0696 ±0.01    CV-RMSE=    67.1  ΔAIC=  219.1
-  3. K 近邻（非参数参照）             k= -  ΔCV-NLL=      参照 ±0.02    CV-RMSE=       -
-【推荐模型：加性形状模型】
-· 杠杆率［数值］：加速上升（指数（加速或衰减）），重要性 24%，各折效应曲线相关 1.00
-· 剩余期限［数值］：上升趋缓（指数（加速或衰减）），重要性 1%，各折效应曲线相关 1.00
-· 评级［类别］：偏移项，重要性 75%（基准类别：BBB）
-· 行业［类别］：偏移项，重要性 0%（基准类别：公用事业）
-· 发行人ID：已剔除——1500 个类别：高基数字段（像 ID），one-hot 会让模型记住样本、造成泄漏
-【需要注意】
-· 特征“发行人ID”已剔除：1500 个类别：高基数字段（像 ID），one-hot 会让模型记住样本、造成泄漏
-【备注】
-· “杠杆率”：线性 → 指数（加速或衰减）（全样本 AIC 下降 149.2）
-· “剩余期限”：线性 → 指数（加速或衰减）（全样本 AIC 下降 70.0）
+== fincurve report: multi-feature mode (credit spread (bp) vs 5 features) ==
+[Data profile]
+  - 1500 observations; y: positive continuous value
+  - features: 2 numeric, 2 categorical, 1 removed
+[Automatic choices]
+  - error model: multiplicative errors (log-normal) — y is positive: with all-linear terms, multiplicative errors (log-normal) has an AIC 2610.9 lower, so it is used
+  - validation: shuffled K-fold, 5 splits — no time ordering
+  - shape search: each numeric feature chooses among linear, quadratic, cubic, log, square root, reciprocal, power, exponential, sigmoid, peak and hinge; a shape is accepted only if AIC drops by at least 4, and an interaction only if AIC drops by at least 10
+  - the shape search is repeated inside every fold (nested), so the score is not flattered by it
+[Ranking]  ΔCV-NLL = held-out negative log-likelihood per row relative to the best model;
+           * recommended, = practically tied with the best (within 2 paired SE and 0.1 nats)
+* 1. Additive shape model                        k=11  ΔCV-NLL=        0 ±0        CV-RMSE=      62  ΔAIC=    0.0
+  2. All-linear GLM (baseline)                   k= 9  ΔCV-NLL=   0.0707 ±0.01     CV-RMSE=    67.1  ΔAIC=  219.1
+  3. k-nearest neighbours (reference)            k= -  ΔCV-NLL=reference ±0.02     CV-RMSE=       -
+[Recommended model: Additive shape model]
+  - leverage [numeric]: accelerating rise (exponential (accelerating or decaying)), importance 24%, fold-to-fold curve correlation 1.00
+  - maturity [numeric]: rising, flattening (exponential (accelerating or decaying)), importance 1%, fold-to-fold curve correlation 1.00
+  - rating [categorical]: offset, importance 75% (reference level: BBB)
+  - sector [categorical]: offset, importance 0% (reference level: utilities)
+  - issuer_id: removed — 1500 categories: a high-cardinality field (looks like an ID); one-hot encoding would let the model memorise rows and leak
+[Warnings]
+  - feature 'issuer_id' was removed: 1500 categories: a high-cardinality field (looks like an ID); one-hot encoding would let the model memorise rows and leak
+[Notes]
+  - 'leverage': linear → exponential (accelerating or decaying) (full-sample AIC −149.2)
+  - 'maturity': linear → exponential (accelerating or decaying) (full-sample AIC −70.0)
 
-（耗时 7.1 秒）
+(elapsed 0.5s)

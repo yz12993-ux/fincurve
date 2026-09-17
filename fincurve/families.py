@@ -42,7 +42,7 @@ class Family:
 
 
 class Gaussian(Family):
-    name, label, extra_params = "gaussian", "加性误差（正态）", 1
+    name, label, extra_params = "gaussian", "additive errors (Gaussian)", 1
 
     def fit_residuals(self, y, mu, w):
         return np.sqrt(w) * (y - mu)
@@ -56,7 +56,7 @@ class Gaussian(Family):
 
 class LogNormal(Family):
     """Multiplicative noise: log y = log f(x) + e. f(x) is the conditional median."""
-    name, label, extra_params, link = "lognormal", "乘性误差（对数正态）", 1, "log"
+    name, label, extra_params, link = "lognormal", "multiplicative errors (log-normal)", 1, "log"
 
     def clip(self, mu):
         return np.maximum(mu, 1e-300)
@@ -83,7 +83,7 @@ class LogNormal(Family):
 
 
 class Poisson(Family):
-    name, label, link = "poisson", "计数（Poisson）", "log"
+    name, label, link = "poisson", "counts (Poisson)", "log"
 
     def clip(self, mu):
         return np.clip(mu, 1e-10, None)
@@ -106,7 +106,7 @@ class Poisson(Family):
 
 class Binomial(Family):
     """Binary outcomes or observed proportions; weights are the number of trials."""
-    name, label, link = "binomial", "概率/比例（二项）", "logit"
+    name, label, link = "binomial", "proportions (binomial)", "logit"
 
     def clip(self, mu):
         return np.clip(mu, 1e-9, 1 - 1e-9)

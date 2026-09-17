@@ -2,27 +2,22 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib import font_manager
 from matplotlib.ticker import FuncFormatter
 
-from .profile import local_linear
+from .kernels import local_linear
 
 SURFACE, INK, INK2, GRID, MUTED = "#fcfcfb", "#0b0b0b", "#52514e", "#e6e5e1", "#b5b4ae"
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a"]
 LINESTYLES = ["-", "--", ":"]
 DATA = "#8a8984"
-FAMILY_SHORT = {"gaussian": "加性", "lognormal": "乘性", "binomial": "二项", "poisson": "Poisson"}
-EFFECT_AXIS = {"gaussian": "对 y 的贡献", "lognormal": "对 ln y 的贡献（乘性）",
-               "binomial": "对 logit(p) 的贡献", "poisson": "对 ln(均值) 的贡献"}
+FAMILY_SHORT = {"gaussian": "additive", "lognormal": "multiplicative", "binomial": "binomial", "poisson": "Poisson"}
+EFFECT_AXIS = {"gaussian": "contribution to y", "lognormal": "contribution to ln y",
+               "binomial": "contribution to logit(p)", "poisson": "contribution to ln(mean)"}
 
 
 def _style():
-    available = {f.name for f in font_manager.fontManager.ttflist}
-    cjk = [f for f in ("Hiragino Sans GB", "PingFang SC", "Heiti SC", "Microsoft YaHei", "Noto Sans CJK SC",
-                       "SimHei", "Arial Unicode MS") if f in available]
     return {
-        "font.family": cjk + ["DejaVu Sans"], "axes.unicode_minus": False, "font.size": 9,
-        "mathtext.fontset": "dejavusans",
+        "font.family": ["DejaVu Sans"], "font.size": 9,
         "figure.facecolor": SURFACE, "axes.facecolor": SURFACE, "savefig.facecolor": SURFACE,
         "axes.edgecolor": GRID, "axes.labelcolor": INK2, "xtick.color": INK2, "ytick.color": INK2,
         "text.color": INK, "axes.spines.top": False, "axes.spines.right": False,
@@ -43,7 +38,7 @@ def _valid_grid(model, grid, x):
     return grid[keep]
 
 
-def _ranking_panel(ax, r, value="d_cv", err="se", xlabel="与最优模型的差距（每个观测的 CV 负对数似然）", limit=15):
+def _ranking_panel(ax, r, value="d_cv", err="se", xlabel="gap to the best model (held-out NLL per row)", limit=15):
     t = r.ranking
     t = t[np.isfinite(t[value])].head(limit)
     ypos = np.arange(len(t))[::-1]
@@ -56,8 +51,8 @@ def _ranking_panel(ax, r, value="d_cv", err="se", xlabel="与最优模型的差�
         ax.errorbar(max(getattr(row, value), 0), yy, xerr=e if np.isfinite(e) else None,
                     fmt="D" if is_ref else "o", ms=6, capsize=2, color=color,
                     mfc=SURFACE if is_ref else color, mew=1.5, lw=1.2)
-        name = row.label + (f"［{FAMILY_SHORT.get(row.family, row.family)}］" if multi else "")
-        labels.append(("★ " if row.id == r.recommended_id else "") + name)
+        name = row.label + (f" [{FAMILY_SHORT.get(row.family, row.family)}]" if multi else "")
+        labels.append(("* " if row.id == r.recommended_id else "") + name)
     ax.set_yticks(ypos)
     ax.set_yticklabels(labels, fontsize=8.5)
     ax.set_xscale("symlog", linthresh=0.01 if value == "d_cv" else 1.0)
@@ -91,7 +86,7 @@ def plot_curve(r, top=3):
 
         if r.profile["target"]["kind"] == "binary":
             jitter = (np.random.default_rng(0).random(y.size) - 0.5) * 0.04
-            ax.scatter(X, y + jitter, s=6, color=DATA, alpha=0.3, edgecolor="none", label="观测（0/1，加了抖动）")
+            ax.scatter(X, y + jitter, s=6, color=DATA, alpha=0.3, edgecolor="none", label="observations (0/1, jittered)")
             edges = np.unique(np.quantile(x, np.linspace(0, 1, 11)))
             ids = np.clip(np.digitize(x, edges[1:-1]), 0, len(edges) - 2)
             xb, pb, eb = [], [], []
@@ -102,10 +97,10 @@ def plot_curve(r, top=3):
                 pb.append(p)
                 eb.append(1.96 * np.sqrt(p * (1 - p) / sel.sum()))
             ax.errorbar(_axis_values(r, np.array(xb)), pb, yerr=eb, fmt="o", color=INK2, ms=5, capsize=2,
-                        label="分箱事件率 ±95%")
+                        label="binned event rate ±95%")
         else:
             big = x.size > 500
-            ax.scatter(X, y, s=8 if big else 18, color=DATA, alpha=0.35 if big else 0.75, edgecolor="none", label="数据")
+            ax.scatter(X, y, s=8 if big else 18, color=DATA, alpha=0.35 if big else 0.75, edgecolor="none", label="data")
 
         grid = np.linspace(0.0 if r.data["term_axis"] else x.min(), x.max(), 400)
         for i, mid in enumerate(shown):
@@ -113,15 +108,15 @@ def plot_curve(r, top=3):
             g = _valid_grid(m, grid, x)
             row = table.set_index("id").loc[mid]
             rank = ranked.index(mid) + 1
-            tag = "推荐" if mid == r.recommended_id else f"第 {rank} 名"
-            fam = f"［{FAMILY_SHORT[m.family.name]}］" if multi else ""
+            tag = "recommended" if mid == r.recommended_id else f"#{rank}"
+            fam = f" [{FAMILY_SHORT[m.family.name]}]" if multi else ""
             d = row["d_cv"]
-            score = f"ΔCV-NLL {d:.3g}" if np.isfinite(d) else "CV 失败"
+            score = f"ΔCV-NLL {d:.3g}" if np.isfinite(d) else "CV failed"
             ax.plot(_axis_values(r, g), m.predict(g), color=SERIES[i], ls=LINESTYLES[i], lw=2,
-                    label=f"{tag}：{m.label}{fam}（{score}）")
+                    label=f"{tag}: {m.label}{fam} ({score})")
         if r.data["term_axis"]:
             ax.set_xlim(left=0)
-        ax.set_title(f"{r.data['y_name']} 对 {r.data['x_name']}：数据与排名靠前的曲线")
+        ax.set_title(f"{r.data['y_name']} vs {r.data['x_name']}: data and the top-ranked curves")
         ax.set_xlabel(r.data["x_name"])
         ax.set_ylabel(r.data["y_name"])
         ax.legend(fontsize=8.5, loc="best")
@@ -133,21 +128,20 @@ def plot_curve(r, top=3):
             axr.axhline(0, color=INK2, lw=1)
             if x.size >= 20:
                 o = np.argsort(x, kind="stable")
-                sub = o if o.size <= 1500 else o[np.linspace(0, o.size - 1, 1500).astype(int)]
-                axr.plot(_axis_values(r, x[sub]), local_linear(x[sub], res[sub], frac=0.3), color=SERIES[0], lw=1.5,
-                         label="残差平滑线")
+                axr.plot(_axis_values(r, x[o]), local_linear(x[o], res[o], frac=0.3), color=SERIES[0], lw=1.5,
+                         label="residual smoother")
                 axr.legend(fontsize=8, loc="best")
             if r.data["term_axis"]:
                 axr.set_xlim(left=0)
-            axr.set_title(f"推荐模型的残差（{rec.label}）")
+            axr.set_title(f"residuals of the recommended model ({rec.label})")
             axr.set_xlabel(r.data["x_name"])
-            axr.set_ylabel("残差")
+            axr.set_ylabel("residual")
 
         _ranking_panel(axk, r)
-        axk.set_title("候选排名（◇ = 非参数参照，误差线 = 1 个标准误）")
-        title = "fincurve 曲线刻画"
+        axk.set_title("candidate ranking (◇ = non-parametric reference, bars = 1 SE)")
+        title = "fincurve: curve characterisation"
         if "returns" in r.extras:
-            title += "（随机游走路径：曲线只反映这条路径的偶然走势，不要据此外推）"
+            title += " (random-walk path: the curves only trace this one path and must not be extrapolated)"
         fig.suptitle(title, x=0.01, ha="left", fontsize=14, fontweight="bold")
         fig.subplots_adjust(left=0.06, right=0.98, top=0.9, bottom=0.08)
     return fig
@@ -167,22 +161,22 @@ def plot_distribution(r, top=3):
         if r.profile["positive"]:
             grid = grid[grid > 0]
         bins = min(80, max(15, int(np.sqrt(y.size))))
-        ah.hist(y, bins=bins, range=(lo - pad, hi + pad), density=True, color=MUTED, edgecolor=SURFACE, label="数据")
+        ah.hist(y, bins=bins, range=(lo - pad, hi + pad), density=True, color=MUTED, edgecolor=SURFACE, label="data")
         counts, edges = np.histogram(y, bins=bins, range=(lo - pad, hi + pad), density=True)
         centres = (edges[:-1] + edges[1:]) / 2
-        al.scatter(centres[counts > 0], counts[counts > 0], s=14, color=DATA, label="数据（直方图密度）")
+        al.scatter(centres[counts > 0], counts[counts > 0], s=14, color=DATA, label="data (histogram density)")
         for i, key in enumerate(shown):
             m = r.models[key]
-            tag = "推荐" if key == r.recommended_id else "对比"
+            tag = "recommended" if key == r.recommended_id else "comparison"
             with np.errstate(all="ignore"):
                 dens = m.pdf(grid)
             for axis in (ah, al):
-                axis.plot(grid, dens, color=SERIES[i], ls=LINESTYLES[i], lw=2, label=f"{tag}：{m.label}")
-        ah.set_title("密度")
+                axis.plot(grid, dens, color=SERIES[i], ls=LINESTYLES[i], lw=2, label=f"{tag}: {m.label}")
+        ah.set_title("density")
         al.set_yscale("log")
         al.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
         al.set_ylim(bottom=max(counts[counts > 0].min() / 5, 1e-6))
-        al.set_title("对数密度（看尾部）")
+        al.set_title("log density (tails)")
         for axis in (ah, al):
             axis.set_xlabel(r.data["y_name"])
             axis.legend(fontsize=8.5)
@@ -196,13 +190,13 @@ def plot_distribution(r, top=3):
             aq.scatter(theo, ys, s=8, color=DATA, alpha=0.6, edgecolor="none")
             lims = [np.nanmin([theo.min(), ys.min()]), np.nanmax([theo.max(), ys.max()])]
             aq.plot(lims, lims, color=SERIES[0], lw=1.5)
-            aq.set_title(f"QQ 图（{rec.label}）：尾部偏离对角线 = 尾部拟合不好")
-            aq.set_xlabel("模型分位数")
-            aq.set_ylabel("经验分位数")
+            aq.set_title(f"QQ plot ({rec.label}): tails off the diagonal are poorly fitted")
+            aq.set_xlabel("model quantile")
+            aq.set_ylabel("empirical quantile")
 
-        _ranking_panel(ak, r, value="d_aic", err=None, xlabel="ΔAIC（越小越好）")
-        ak.set_title("分布排名")
-        fig.suptitle(f"fincurve 分布刻画：{r.data['y_name']}", x=0.01, ha="left", fontsize=14, fontweight="bold")
+        _ranking_panel(ak, r, value="d_aic", err=None, xlabel="ΔAIC (lower is better)")
+        ak.set_title("distribution ranking")
+        fig.suptitle(f"fincurve: distribution of {r.data['y_name']}", x=0.01, ha="left", fontsize=14, fontweight="bold")
         fig.subplots_adjust(left=0.06, right=0.98, top=0.9, bottom=0.07, hspace=0.35, wspace=0.28)
     return fig
 
@@ -212,9 +206,8 @@ def plot_additive(r, top=3):
     effects = model.partial_effects()
     feats = r.extras["additive"]["features"].set_index("feature")
     names = list(effects)[:11]
-    panels = len(names) + 1
     ncols = 3
-    nrows = int(np.ceil(panels / ncols))
+    nrows = int(np.ceil((len(names) + 1) / ncols))
     fam = model.design.family.name
     height = 4.6 * nrows + 1.0
     global_span = max((np.ptp(eff) if kind == "numeric" else np.max(np.abs(eff)))
@@ -231,7 +224,8 @@ def plot_additive(r, top=3):
                 lo, span = np.nanmin(eff), (np.ptp(eff) or 1.0)
                 ax.plot(sample, np.full(sample.size, lo - 0.12 * span), "|", color=DATA, ms=8, alpha=0.5)
                 ax.set_ylim(lo - 0.2 * span, np.nanmax(eff) + 0.08 * span)
-                ax.set_xlabel(f"{name}（下方短线 = 数据分布）")
+                ax.set_xlabel(f"{name} (ticks below = data distribution)")
+                ax.set_ylabel(EFFECT_AXIS[fam])
             else:
                 order = np.argsort(eff)
                 eff, xs = np.asarray(eff)[order], [xs[i] for i in order]
@@ -246,19 +240,16 @@ def plot_additive(r, top=3):
                 lo, hi = min(eff.min(), 0.0), max(eff.max(), 0.0)
                 pad = max(0.0, 0.5 * global_span - (hi - lo)) / 2 + 0.05 * global_span
                 ax.set_xlim(lo - pad, hi + pad)
+                ax.set_xlabel(EFFECT_AXIS[fam] + ", vs reference level")
             trend = info.get("trend")
             desc = trend if isinstance(trend, str) else info["shape"]
-            ax.set_title(f"{name}：{desc}（重要性 {info['importance']:.0%}）", fontsize=10)
-            if kind == "numeric":
-                ax.set_ylabel(EFFECT_AXIS[fam])
-            else:
-                ax.set_xlabel(EFFECT_AXIS[fam] + "（相对基准类别）")
+            ax.set_title(f"{name}: {desc} (importance {info['importance']:.0%})", fontsize=10)
         ak = flat[len(names)]
         _ranking_panel(ak, r)
-        ak.set_title("模型比较（◇ = K 近邻参照）", fontsize=10)
+        ak.set_title("model comparison (◇ = k-nearest-neighbour reference)", fontsize=10)
         for ax in flat[len(names) + 1:]:
             ax.axis("off")
-        fig.suptitle(f"fincurve 多特征刻画：{r.data['y_name']}（推荐：{model.label}）",
+        fig.suptitle(f"fincurve: multi-feature characterisation of {r.data['y_name']} (recommended: {model.label})",
                      x=0.01, ha="left", fontsize=14, fontweight="bold")
         fig.subplots_adjust(left=0.08, right=0.98, top=1 - 0.9 / height, bottom=0.75 / height,
                             hspace=0.5, wspace=0.4)

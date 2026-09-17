@@ -3,10 +3,10 @@ import numpy as np
 import pandas as pd
 
 CV_LABELS = {
-    "kfold": "随机 K 折",
-    "time": "按时间滚动（只用过去预测未来）",
-    "loo": "留一法",
-    "group": "按组 K 折（同一组不会同时出现在训练和测试里）",
+    "kfold": "shuffled K-fold",
+    "time": "rolling origin (fit on the past, score on the future)",
+    "loo": "leave-one-out",
+    "group": "grouped K-fold (a group never appears in both training and test data)",
 }
 
 

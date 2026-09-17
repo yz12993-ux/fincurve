@@ -12,14 +12,9 @@
   };
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const params = new URLSearchParams(location.search);
-  const state = {
-    lang: (params.get("lang") || store.get("fc-lang")) === "zh" ? "zh" : "en",
-    caseIdx: 0, impactLog: false, libGroup: "all", libQuery: "",
-  };
   if (params.get("theme") === "light" || params.get("theme") === "dark") root.setAttribute("data-theme", params.get("theme"));
+  const state = { caseIdx: 0, impactLog: false, libGroup: "all", libQuery: "" };
 
-  const tr = (en, zh) => (state.lang === "zh" ? zh : en);
-  const L = (o) => (o && typeof o === "object" && ("en" in o || "zh" in o) ? (o[state.lang] != null ? o[state.lang] : o.en) : o);
   const cssVar = (n) => getComputedStyle(root).getPropertyValue(n).trim();
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -31,54 +26,7 @@
   }
   const fmtTick = (v) => (Math.abs(v) >= 1000 ? Math.round(v).toLocaleString("en-US") : String(+v.toPrecision(4)));
   const pct = (v) => (v == null ? "–" : `${(v * 100).toFixed(v < 0.1 && v > 0 ? 1 : 0)}%`);
-
-  // ---------------------------------------------------------------- static i18n
-  const ZH = {
-    "nav.pipeline": "流程", "nav.cases": "案例", "nav.scoreboard": "计分板", "nav.method": "方法", "nav.library": "函数库", "nav.start": "快速开始",
-    "hero.eyebrow": "开源 · Python · MIT",
-    "hero.title": "你的金融数据<span class=\"grad\">究竟</span>遵循哪条曲线？",
-    "hero.lead": "fincurve 先给数据做画像，自动选择误差模型和验证方式，再拟合 32 种候选形式——从 Nelson–Siegel、SVI 到违约强度曲线和幂律——按<b>留出数据上的似然</b>排名。它也知道什么时候<b>不该</b>拟合曲线。",
-    "hero.cta1": "在 GitHub 查看", "hero.cta2": "看它如何还原已知模型",
-    "pipe.title": "六步：从原始数据到站得住脚的结论",
-    "pipe.sub": "每个决定都来自数据本身并写进报告，可以逐条核查某个形式为什么胜出。",
-    "pipe.s1": "数据画像", "pipe.s1d": "y 的类型、形状、噪声是否随水平变化、时间顺序，以及从列名读出的金融语境。",
-    "pipe.s2": "似然", "pipe.s2d": "正态、对数正态、二项或 Poisson。拿不准时，加性与乘性误差一起竞争。",
-    "pipe.s3": "验证", "pipe.s3d": "随机 K 折；时间序列用滚动验证；可按组切分；样本极少时用留一法。",
-    "pipe.s4": "拟合", "pipe.s4d": "32 种形式 × 多起点有界最小二乘；先在网格上解线性系数，保证起点稳定。",
-    "pipe.s5": "排名", "pipe.s5d": "按每行的留出负对数似然排名。并列需同时满足 2 个配对标准误和 0.1 nats；并列中最简单的胜出。",
-    "pipe.s6": "护栏", "pipe.s6d": "随机游走、半边峰、外推分歧、厚尾、数据泄漏、波动聚集。",
-    "cases.title": "四组答案已知的数据",
-    "cases.sub": "每组数据都由已知模型模拟生成，所以能检验 fincurve 是否还原了真相。下面所有的点、曲线、排名和日志都导出自库的真实运行。",
-    "score.title": "全部 11 个场景，包括没识别出来的",
-    "score.sub": "同一随机种子、默认设置、不调参。没推荐真实形式时，表里写明它排第几、以及数据为什么分不出来。",
-    "method.title": "胜者是怎么选出来的",
-    "method.sub": "不看 R²。看留出似然、配对标准误和实际等价差距。",
-    "m1.t": "每行的留出似然",
-    "m1.d": "第 i 行所在的那一折不参与参数估计。正态、对数正态、二项和 Poisson 模型用同一把尺子，加性和乘性误差可以直接竞争。",
-    "m2.t": "并列的两个条件",
-    "m2.d": "配对标准误基于每行与最优模型的差值。0.1 nats 的差距（正态误差下约为 RMSE 相差 10%）防止小样本把所有模型都判成一样。并列模型中参数最少的被推荐。",
-    "m3.t": "在每一折里重新搜索形状",
-    "m3.d": "多特征模式中，形状与交互项的贪心搜索在每个训练折上重做，报告的分数不会被搜索过程美化。各折效应曲线的相关性说明形状是否真实。",
-    "m4.t": "它会提醒什么",
-    "m4.d": "<li>随机游走路径——不推荐曲线，转而分析收益率</li><li>用峰形函数拟合单调数据</li><li>外推后分歧很大的并列模型</li><li>厚尾残差和离群点</li><li>行号/ID 泄漏和高度共线的特征</li><li>收益率样本中的波动聚集</li>",
-    "lib.title": "32 种候选形式",
-    "lib.sub": "每种形式都带参数边界、定义域规则和基于网格的起始值。y 为 0/1、比例或计数时，自动加入 logit 或 log 连接的广义线性版本。",
-    "start.title": "一分钟上手",
-    "start.sub": "依赖只有 numpy、scipy、pandas 和 matplotlib。",
-    "start.note": "文字报告目前是中文；结构化结果（report.ranking、report.recommended、report.warnings）不受语言限制。",
-    "foot.gen": "数据生成于",
-  };
-
-  function applyStatic() {
-    $$("[data-i18n]").forEach((el) => {
-      if (el.dataset.en == null) el.dataset.en = el.innerHTML;
-      const key = el.dataset.i18n;
-      el.innerHTML = state.lang === "zh" && ZH[key] != null ? ZH[key] : el.dataset.en;
-    });
-    root.lang = state.lang === "zh" ? "zh-CN" : "en";
-    $("#langBtn").textContent = state.lang === "zh" ? "EN" : "中文";
-    $("#libSearch").placeholder = tr("search forms…", "搜索形式…");
-  }
+  const secs = (v) => (v == null ? "–" : v < 1 ? `${(v * 1000).toFixed(0)} ms` : `${v.toFixed(v < 10 ? 2 : 1)} s`);
 
   // ---------------------------------------------------------------- svg helpers
   const NS = "http://www.w3.org/2000/svg";
@@ -179,7 +127,7 @@
     bars.forEach((b) => { xs.push(b.x0, b.x1); ys.push(0, b.d); });
     series.forEach((s) => s.xy.forEach(([x, y]) => {
       if (!okX(x)) return;
-      if (!spec.xFromData) xs.push(x);
+      xs.push(x);
       if (okY(y) && !spec.yFromData) ys.push(y);
     }));
     xs = xs.filter(okX);
@@ -248,8 +196,10 @@
     const markers = series.map((s) => S("circle", { r: 4, fill: surf, stroke: s.color, "stroke-width": 2, visibility: "hidden" }, svg));
     const ring = S("circle", { r: 6.5, fill: "none", stroke: cssVar("--text"), "stroke-width": 1.5, visibility: "hidden" }, svg);
     const overlay = S("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent" }, svg);
-    const hide = () => { tip.classList.remove("on"); [cross, ring].concat(markers).forEach((e) => e.setAttribute("visibility", "hidden")); };
-    overlay.addEventListener("pointerleave", hide);
+    overlay.addEventListener("pointerleave", () => {
+      tip.classList.remove("on");
+      [cross, ring].concat(markers).forEach((e) => e.setAttribute("visibility", "hidden"));
+    });
     overlay.addEventListener("pointermove", (ev) => {
       const rect = svg.getBoundingClientRect();
       const px = ev.clientX - rect.left, py = ev.clientY - rect.top;
@@ -279,7 +229,7 @@
   }
 
   // ---------------------------------------------------------------- ranking dot plot (symlog)
-  const FAMILY = { gaussian: ["additive", "加性"], lognormal: ["multiplicative", "乘性"], binomial: ["binomial", "二项"], poisson: ["Poisson", "Poisson"] };
+  const FAMILY = { gaussian: "additive", lognormal: "multiplicative", binomial: "binomial", poisson: "Poisson" };
   function rankChart(host, rows, opts) {
     opts = opts || {};
     host.innerHTML = "";
@@ -304,9 +254,9 @@
     });
     const gx = sx(0.1);
     S("line", { x1: gx, x2: gx, y1: m.t - 14, y2: H - m.b, stroke: cssVar("--warning"), "stroke-dasharray": "4 3", "stroke-opacity": 0.85 }, svg);
-    S("text", { x: gx + 5, y: m.t - 12, "text-anchor": "start" }, svg).textContent = tr("0.1-nat gap", "0.1 差距");
+    S("text", { x: gx + 5, y: m.t - 12, "text-anchor": "start" }, svg).textContent = "0.1-nat gap";
     S("text", { x: (m.l + W - m.r) / 2, y: H - 6, "text-anchor": "middle", class: "axis-label" }, svg).textContent =
-      opts.xLabel || tr("Δ held-out NLL per row vs best (symlog)", "与最优相比每行留出 NLL 之差（对称对数刻度）");
+      opts.xLabel || "Δ held-out NLL per row vs best (symlog)";
 
     const tip = document.createElement("div");
     tip.className = "tooltip";
@@ -315,8 +265,8 @@
       const cy = m.t + i * rowH + rowH / 2;
       const band = S("rect", { x: 0, y: cy - rowH / 2 + 1, width: W, height: rowH - 2, rx: 6, fill: "transparent" }, svg);
       const color = r.rec ? s1 : r.tie ? text2 : muted;
-      const fam = opts.showFamily && FAMILY[r.family] ? ` · ${tr(FAMILY[r.family][0], FAMILY[r.family][1])}` : "";
-      const label = (r.rec ? "★ " : "") + L(r.label) + fam;
+      const fam = opts.showFamily && FAMILY[r.family] ? ` · ${FAMILY[r.family]}` : "";
+      const label = (r.rec ? "★ " : "") + r.label + fam;
       const t = S("text", { x: m.l - 12, y: cy + 4, "text-anchor": "end", "pointer-events": "none" }, svg);
       t.textContent = fitText(label, m.l - 20);
       t.setAttribute("style", `font-family: var(--sans); font-size: 12px; fill: ${r.rec ? cssVar("--text") : text2}; font-weight: ${r.rec ? 600 : 400}`);
@@ -332,33 +282,86 @@
       band.addEventListener("pointerleave", () => { band.setAttribute("fill", "transparent"); tip.classList.remove("on"); });
       band.addEventListener("pointermove", (ev) => {
         const rect = svg.getBoundingClientRect();
-        const status = r.ref ? tr("reference only — not eligible", "仅作参照，不参与推荐")
-          : r.rec ? tr("recommended", "推荐") : r.tie ? tr("tied with best", "与最优并列") : tr("not tied", "不并列");
-        tip.innerHTML = `<div class="th">#${r.rank || i + 1} ${esc(L(r.label) + fam)}</div>`
+        const status = r.ref ? "reference only — not eligible" : r.rec ? "recommended" : r.tie ? "tied with best" : "not tied";
+        tip.innerHTML = `<div class="th">#${r.rank || i + 1} ${esc(r.label + fam)}</div>`
           + tipRow("", "Δ ± SE", `${fmtNum(r.d, 3)} ± ${fmtNum(r.se, 2)}`)
-          + (r.k != null ? tipRow("", tr("parameters", "参数个数"), String(r.k)) : "")
-          + tipRow("", tr("status", "状态"), status);
+          + (r.k != null ? tipRow("", "parameters", String(r.k)) : "")
+          + tipRow("", "status", status);
         placeTip(tip, ev.clientX - rect.left, ev.clientY - rect.top, W);
       });
     });
   }
 
   function rankTable(rows, showFamily) {
-    const body = rows.map((r) => `<tr><td>${r.rec ? "★ " : ""}${esc(L(r.label))}${showFamily && FAMILY[r.family] ? `<div class="sub">${esc(tr(FAMILY[r.family][0], FAMILY[r.family][1]))}</div>` : ""}</td>`
+    const body = rows.map((r) => `<tr><td>${r.rec ? "★ " : ""}${esc(r.label)}${showFamily && FAMILY[r.family] ? `<div class="sub">${esc(FAMILY[r.family])}</div>` : ""}</td>`
       + `<td class="num">${r.k == null ? "–" : r.k}</td><td class="num">${fmtNum(r.d, 3)}</td><td class="num">${fmtNum(r.se, 2)}</td>`
-      + `<td>${r.ref ? tr("reference", "参照") : r.tie ? tr("tied", "并列") : ""}</td></tr>`).join("");
-    return `<details class="note"><summary>${tr("Show as table", "以表格查看")}</summary><div class="table-wrap" style="margin-top:8px"><table class="table mini">`
-      + `<thead><tr><th>${tr("model", "模型")}</th><th class="num">k</th><th class="num">Δ</th><th class="num">SE</th><th></th></tr></thead><tbody>${body}</tbody></table></div></details>`;
+      + `<td>${r.ref ? "reference" : r.tie ? "tied" : ""}</td></tr>`).join("");
+    return `<details class="note"><summary>Show as table</summary><div class="table-wrap" style="margin-top:8px"><table class="table mini">`
+      + `<thead><tr><th>model</th><th class="num">k</th><th class="num">Δ</th><th class="num">SE</th><th></th></tr></thead><tbody>${body}</tbody></table></div></details>`;
+  }
+
+  // ---------------------------------------------------------------- speed-up dumbbell chart (log seconds)
+  function speedChart(host, rows) {
+    host.innerHTML = "";
+    const muted = cssVar("--muted"), s1 = cssVar("--s1"), text2 = cssVar("--text-2"), gridC = cssVar("--grid"), surf = cssVar("--surface"), elev = cssVar("--elev");
+    const legend = document.createElement("div");
+    legend.className = "legend";
+    legend.innerHTML = `<span><i>${swDot(muted)}</i>v0.1.0: general least squares, NumPy loops</span><span><i>${swDot(s1)}</i>v0.2.0: variable projection, IRLS, C kernels</span>`;
+    host.appendChild(legend);
+    const box = document.createElement("div");
+    box.className = "chart";
+    host.appendChild(box);
+    const W = Math.max(260, Math.floor(box.clientWidth || host.clientWidth));
+    const rowH = 30;
+    const labelW = Math.min(230, Math.max(120, Math.round(W * 0.34)));
+    const m = { t: 8, r: 58, b: 40, l: labelW };
+    const H = m.t + rows.length * rowH + m.b;
+    const lo = Math.min(...rows.map((r) => r.after)) / 1.5, hi = Math.max(...rows.map((r) => r.before)) * 1.3;
+    const sx = mkScale("log", lo, hi, m.l, W - m.r);
+    const svg = S("svg", { width: W, height: H, role: "img", "aria-label": "benchmark before and after" }, box);
+    logTicks(lo, hi).forEach((v) => {
+      const x = sx(v);
+      S("line", { x1: x, x2: x, y1: m.t, y2: H - m.b, stroke: gridC }, svg);
+      S("text", { x, y: H - m.b + 16, "text-anchor": "middle" }, svg).textContent = v < 1 ? `${+(v * 1000).toPrecision(3)} ms` : `${v} s`;
+    });
+    S("text", { x: (m.l + W - m.r) / 2, y: H - 6, "text-anchor": "middle", class: "axis-label" }, svg).textContent = "wall-clock time per analyze() call (log scale)";
+    const tip = document.createElement("div");
+    tip.className = "tooltip";
+    box.appendChild(tip);
+    rows.forEach((r, i) => {
+      const cy = m.t + i * rowH + rowH / 2;
+      const band = S("rect", { x: 0, y: cy - rowH / 2 + 1, width: W, height: rowH - 2, rx: 6, fill: "transparent" }, svg);
+      const t = S("text", { x: m.l - 12, y: cy + 4, "text-anchor": "end", "pointer-events": "none" }, svg);
+      t.textContent = fitText(r.label, m.l - 20);
+      t.setAttribute("style", `font-family: var(--sans); font-size: 12px; fill: ${text2}`);
+      const xa = sx(r.before), xb = sx(r.after);
+      S("line", { x1: xb, x2: xa, y1: cy, y2: cy, stroke: muted, "stroke-width": 2, "pointer-events": "none" }, svg);
+      S("circle", { cx: xa, cy, r: 5, fill: muted, stroke: surf, "stroke-width": 2, "pointer-events": "none" }, svg);
+      S("circle", { cx: xb, cy, r: 6, fill: s1, stroke: surf, "stroke-width": 2, "pointer-events": "none" }, svg);
+      const speed = r.before / r.after;
+      const label = S("text", { x: W - m.r + 10, y: cy + 4, "text-anchor": "start", "pointer-events": "none" }, svg);
+      label.textContent = `${speed.toFixed(speed < 10 ? 1 : 0)}×`;
+      label.setAttribute("style", `fill: ${speed >= 1.5 ? cssVar("--text") : muted}; font-weight: 600`);
+      band.addEventListener("pointerenter", () => band.setAttribute("fill", elev));
+      band.addEventListener("pointerleave", () => { band.setAttribute("fill", "transparent"); tip.classList.remove("on"); });
+      band.addEventListener("pointermove", (ev) => {
+        const rect = svg.getBoundingClientRect();
+        tip.innerHTML = `<div class="th">${esc(r.label)}</div>` + tipRow(swDot(muted), "v0.1.0", secs(r.before))
+          + tipRow(swDot(s1), "v0.2.0", secs(r.after)) + tipRow("", "speed-up", `${speed.toFixed(1)}×`)
+          + tipRow("", "same recommendation", r.same ? "yes" : "no");
+        placeTip(tip, ev.clientX - rect.left, ev.clientY - rect.top, W);
+      });
+    });
   }
 
   // ---------------------------------------------------------------- hero
   let termTimer = null;
-  function renderHeroTerm(animate) {
+  function renderHeroTerm() {
     const host = $("#heroTerm");
     clearTimeout(termTimer);
     const c = D.cases[0];
     const lines = [{ prompt: '>>> report = analyze(df["ln(K/F)"], df["implied_vol"])' }]
-      .concat(c.log.map((l) => ({ tag: l.tag, text: L(l.text) })))
+      .concat(c.log.map((l) => ({ tag: l.tag, text: l.text })))
       .concat([{ prompt: ">>> report.recommended.candidate.key  # 'svi_smile'", cursor: true }]);
     host.innerHTML = "";
     const add = (line) => {
@@ -372,7 +375,7 @@
       }
       host.appendChild(div);
     };
-    if (!animate || reduceMotion) { lines.forEach(add); return; }
+    if (reduceMotion) { lines.forEach(add); return; }
     let i = 0;
     const step = () => { add(lines[i++]); if (i < lines.length) termTimer = setTimeout(step, i === 1 ? 650 : 420); };
     termTimer = setTimeout(step, 300);
@@ -380,26 +383,27 @@
 
   function renderStats() {
     const hits = D.scoreboard.filter((r) => r.verdict === "hit").length;
+    const b = D.benchmark;
     const items = [
-      [D.stats.candidates, tr("candidate forms", "种候选形式")],
-      [D.stats.likelihoods, tr("likelihoods", "种似然")],
-      [`${hits}/${D.scoreboard.length}`, tr("known models recovered", "个已知模型被还原")],
-      [D.stats.tests, tr("regression tests", "个回归测试")],
+      [D.stats.candidates, "candidate forms"],
+      b ? [`${b.total_speedup.toFixed(1)}×`, "faster than v0.1.0"] : [D.stats.likelihoods, "likelihoods"],
+      [`${hits}/${D.scoreboard.length}`, "known models recovered"],
+      [D.stats.tests, "regression tests"],
     ];
     $("#stats").innerHTML = items.map(([v, l]) => `<div class="stat"><b class="mono">${v}</b><span>${esc(l)}</span></div>`).join("");
   }
 
   // ---------------------------------------------------------------- cases
   const CASES = [
-    { n: "01", tab: ["Volatility smile", "波动率微笑"], kicker: ["curve mode", "曲线模式"] },
-    { n: "02", tab: ["Market impact", "市场冲击"], kicker: ["curve mode · noise model", "曲线模式 · 误差模型"] },
-    { n: "03", tab: ["Loan defaults", "贷款违约"], kicker: ["multi-feature mode", "多特征模式"] },
-    { n: "04", tab: ["Random-walk trap", "随机游走陷阱"], kicker: ["guardrail", "护栏"] },
+    { n: "01", tab: "Volatility smile", kicker: "curve mode" },
+    { n: "02", tab: "Market impact", kicker: "curve mode · noise model" },
+    { n: "03", tab: "Loan defaults", kicker: "multi-feature mode" },
+    { n: "04", tab: "Random-walk trap", kicker: "guardrail" },
   ];
 
   function renderTabs() {
     const host = $("#caseTabs");
-    host.innerHTML = CASES.map((c, i) => `<button class="tab" role="tab" type="button" id="tab-${i}" aria-controls="casePanel" aria-selected="${i === state.caseIdx}" tabindex="${i === state.caseIdx ? 0 : -1}"><span class="n">${c.n}</span>${esc(tr(c.tab[0], c.tab[1]))}</button>`).join("");
+    host.innerHTML = CASES.map((c, i) => `<button class="tab" role="tab" type="button" id="tab-${i}" aria-controls="casePanel" aria-selected="${i === state.caseIdx}" tabindex="${i === state.caseIdx ? 0 : -1}"><span class="n">${c.n}</span>${esc(c.tab)}</button>`).join("");
     $$(".tab", host).forEach((b, i) => {
       b.addEventListener("click", () => selectCase(i));
       b.addEventListener("keydown", (ev) => {
@@ -412,21 +416,21 @@
   }
   function selectCase(i) {
     state.caseIdx = i;
-    try { history.replaceState(null, "", `${location.pathname}${location.search}#case-${D.cases[i].id}`); } catch (e) { /* file:// or sandboxed */ }
     $$(".tab").forEach((b, j) => { b.setAttribute("aria-selected", String(i === j)); b.tabIndex = i === j ? 0 : -1; });
     $("#casePanel").setAttribute("aria-labelledby", `tab-${i}`);
+    try { history.replaceState(null, "", `${location.pathname}${location.search}#case-${D.cases[i].id}`); } catch (e) { /* file:// or sandboxed */ }
     renderCase();
   }
 
   function caseHead(c, meta) {
-    return `<div class="case-head"><div><div class="card-kicker mono">case ${meta.n} · ${esc(tr(meta.kicker[0], meta.kicker[1]))}</div>`
-      + `<h3>${esc(L(c.title))}</h3><p>${esc(L(c.claim))}</p></div>`
-      + `<div class="badges"><div class="badge"><span>${tr("ground truth", "真实模型")}</span><b>${esc(L(c.truth))}</b></div>`
-      + `<div class="badge ok"><span>${tr("identified", "识别结果")}</span><b>${esc(L(c.identified))}</b></div></div></div>`;
+    return `<div class="case-head"><div><div class="card-kicker mono">case ${meta.n} · ${esc(meta.kicker)} · analyze() in ${esc(secs(c.seconds))}</div>`
+      + `<h3>${esc(c.title)}</h3><p>${esc(c.claim)}</p></div>`
+      + `<div class="badges"><div class="badge"><span>ground truth</span><b>${esc(c.truth)}</b></div>`
+      + `<div class="badge ok"><span>identified</span><b>${esc(c.identified)}</b></div></div></div>`;
   }
   function logCard(c) {
-    const lines = c.log.map((l) => `<div class="term-line${l.tag === "verdict" ? " verdict" : ""}"><span class="tag">${esc(l.tag)}</span><span class="txt">${esc(L(l.text))}</span></div>`).join("");
-    return `<div class="log"><div class="term-bar"><span></span><span></span><span></span><div class="term-title mono">${tr("decision log", "决策日志")}</div></div><div class="term-body mono">${lines}</div></div>`;
+    const lines = c.log.map((l) => `<div class="term-line${l.tag === "verdict" ? " verdict" : ""}"><span class="tag">${esc(l.tag)}</span><span class="txt">${esc(l.text)}</span></div>`).join("");
+    return `<div class="log"><div class="term-bar"><span></span><span></span><span></span><div class="term-title mono">decision log</div></div><div class="term-body mono">${lines}</div></div>`;
   }
   function card(title, sub, inner, extraHead) {
     return `<div class="card"><div class="card-head"><div><h3>${title}</h3>${sub ? `<p>${sub}</p>` : ""}</div>${extraHead || ""}</div>${inner}</div>`;
@@ -437,14 +441,13 @@
     const pal = PALETTE();
     let k = 0;
     return list.map((s) => {
-      if (s.truth) return { label: L(s.label), x: s.x, y: s.y, color: cssVar("--text"), dash: "1.5 5", width: 2.2 };
-      const style = { label: L(s.label), x: s.x, y: s.y, color: pal[k], dash: DASHES[k] };
+      if (s.truth) return { label: s.label, x: s.x, y: s.y, color: cssVar("--text"), dash: "1.5 5", width: 2.2 };
+      const style = { label: s.label, x: s.x, y: s.y, color: pal[k], dash: DASHES[k] };
       k += 1;
       return style;
     });
   }
-  const rankSub = () => tr("Held-out NLL per row relative to the best model, ±1 paired SE. ◆ = non-parametric reference. Dashed line = practical-equivalence gap.",
-    "相对最优模型的每行留出 NLL 差，误差线为 ±1 个配对标准误。◆ = 非参数参照。虚线 = 实际等价差距。");
+  const RANK_SUB = "Held-out NLL per row relative to the best model, ±1 paired SE. ◆ = non-parametric reference. Dashed line = practical-equivalence gap.";
 
   function renderSmile(panel, c) {
     const params = c.params.map((p) => {
@@ -452,32 +455,31 @@
       return `<tr><td class="mono">${esc(p.name)}</td><td class="num">${fmtNum(p.truth, 4)}</td><td class="num">${fmtNum(p.fitted, 4)}</td><td class="num">${rel == null ? "–" : (rel >= 0 ? "+" : "") + (rel * 100).toFixed(1) + "%"}</td></tr>`;
     }).join("");
     panel.insertAdjacentHTML("beforeend",
-      `<div class="grid-2">${card(tr("Data, top-3 forms and the ground truth", "数据、前三名形式与真实曲线"), tr("Hover to compare fitted values.", "悬停查看各曲线的拟合值。"), '<div id="chartMain"></div>')}${logCard(c)}</div>`
-      + `<div class="grid-2">${card(tr("Cross-validated ranking", "交叉验证排名"), rankSub(), '<div id="chartRank"></div>' + rankTable(c.ranking))}`
-      + card(tr("Parameter recovery", "参数还原"), tr("a′ = 10⁴·a/T and b′ = 10⁴·b/T put SVI in vol-% units.", "a′ = 10⁴·a/T、b′ = 10⁴·b/T，把 SVI 换算到波动率百分比单位。"),
-        `<div class="table-wrap"><table class="table mini"><thead><tr><th>${tr("parameter", "参数")}</th><th class="num">${tr("truth", "真实")}</th><th class="num">${tr("fitted", "拟合")}</th><th class="num">${tr("error", "误差")}</th></tr></thead><tbody>${params}</tbody></table></div>`
-        + `<p class="note">${tr("a′ and σ slide along a ridge — raising one and lowering the other barely changes the curve — so they are individually loose. Their combination at the smile's vertex is pinned down to about 2%.",
-          "a′ 和 σ 位于一条“脊线”上：一个升、一个降，曲线几乎不变，所以单独看都不够准；但它们在微笑谷底的组合被确定到约 2%。")}</p>`) + `</div>`);
+      `<div class="grid-2">${card("Data, top-3 forms and the ground truth", "Hover to compare fitted values.", '<div id="chartMain"></div>')}${logCard(c)}</div>`
+      + `<div class="grid-2">${card("Cross-validated ranking", RANK_SUB, '<div id="chartRank"></div>' + rankTable(c.ranking))}`
+      + card("Parameter recovery", "a′ = 10⁴·a/T and b′ = 10⁴·b/T put SVI in vol-% units.",
+        `<div class="table-wrap"><table class="table mini"><thead><tr><th>parameter</th><th class="num">truth</th><th class="num">fitted</th><th class="num">error</th></tr></thead><tbody>${params}</tbody></table></div>`
+        + `<p class="note">a′ and σ slide along a ridge — raising one and lowering the other barely changes the curve — so each is loosely identified on its own. Their combination at the smile's vertex is pinned down to about 2%.</p>`) + `</div>`);
     const ch = c.chart;
-    lineChart($("#chartMain"), { xLabel: L(ch.xLabel), yLabel: L(ch.yLabel), xShort: "ln(K/F)", points: ch.points, pointsLabel: tr("observed", "观测值"), series: styledSeries(ch.series), aria: L(c.title) });
-    rankChart($("#chartRank"), c.ranking, { aria: tr("ranking", "排名") });
+    lineChart($("#chartMain"), { xLabel: ch.xLabel, yLabel: ch.yLabel, xShort: "ln(K/F)", points: ch.points, pointsLabel: "observed", series: styledSeries(ch.series), aria: c.title });
+    rankChart($("#chartRank"), c.ranking, { aria: "ranking" });
   }
 
   function renderImpact(panel, c) {
     const params = c.params.map((p) => `<tr><td>${esc(p.name)}</td><td class="num">${fmtNum(p.truth, 4)}</td><td class="num">${fmtNum(p.fitted, 4)}</td></tr>`).join("");
     const toggle = `<div class="seg" role="group" aria-label="axis scale"><button type="button" data-scale="lin" aria-pressed="${!state.impactLog}">linear</button><button type="button" data-scale="log" aria-pressed="${state.impactLog}">log–log</button></div>`;
     panel.insertAdjacentHTML("beforeend",
-      `<div class="grid-2">${card(tr("Impact vs participation", "冲击成本与参与率"), tr("Curves show the conditional median. On log–log axes a square-root law is a straight line with slope ½.", "曲线为条件中位数。在双对数坐标下，平方根律是一条斜率为 ½ 的直线。"), '<div id="chartMain"></div>', toggle)}${logCard(c)}</div>`
-      + `<div class="grid-2">${card(tr("Ranking across both noise models", "两种误差模型一起排名"), rankSub(), '<div id="chartRank"></div>' + rankTable(c.ranking, true))}`
-      + card(tr("Evidence", "证据"), tr("Noise model first, then the shape.", "先定误差模型，再定形状。"),
-        `<div class="bigpair"><div><b>${fmtNum(c.families.multiplicative, 3)}</b><span>${tr("best multiplicative model, Δ", "最好的乘性误差模型 Δ")}</span></div><div><b>${fmtNum(c.families.additive, 3)} <span class="mono" style="font-size:13px">± ${fmtNum(c.families.additive_se, 2)}</span></b><span>${tr("best additive model, Δ", "最好的加性误差模型 Δ")}</span></div></div>`
-        + `<div class="table-wrap"><table class="table mini"><thead><tr><th>${tr("quantity", "量")}</th><th class="num">${tr("truth", "真实")}</th><th class="num">${tr("fitted", "拟合")}</th></tr></thead><tbody>${params}</tbody></table></div>`
-        + `<p class="note">${tr("The free power-law exponent is fitted independently of the √q form and lands on ½.", "自由幂律的指数与 √q 形式独立拟合，结果落在 ½ 附近。")}</p>`) + `</div>`);
+      `<div class="grid-2">${card("Impact vs participation", "Curves show the conditional median. On log–log axes a square-root law is a straight line with slope ½.", '<div id="chartMain"></div>', toggle)}${logCard(c)}</div>`
+      + `<div class="grid-2">${card("Ranking across both noise models", RANK_SUB, '<div id="chartRank"></div>' + rankTable(c.ranking, true))}`
+      + card("Evidence", "Noise model first, then the shape.",
+        `<div class="bigpair"><div><b>${fmtNum(c.families.multiplicative, 3)}</b><span>best multiplicative model, Δ</span></div><div><b>${fmtNum(c.families.additive, 3)} <span class="mono" style="font-size:13px">± ${fmtNum(c.families.additive_se, 2)}</span></b><span>best additive model, Δ</span></div></div>`
+        + `<div class="table-wrap"><table class="table mini"><thead><tr><th>quantity</th><th class="num">truth</th><th class="num">fitted</th></tr></thead><tbody>${params}</tbody></table></div>`
+        + `<p class="note">The free power-law exponent is fitted independently of the √q form and lands on ½.</p>`) + `</div>`);
     const draw = () => {
       const ch = c.chart;
       lineChart($("#chartMain"), {
-        xLabel: L(ch.xLabel), yLabel: L(ch.yLabel), xShort: "q", points: ch.points, pointsLabel: tr("observed trades", "观测交易"),
-        series: styledSeries(ch.series), xType: state.impactLog ? "log" : "linear", yType: state.impactLog ? "log" : "linear", aria: L(c.title),
+        xLabel: ch.xLabel, yLabel: ch.yLabel, xShort: "q", points: ch.points, pointsLabel: "observed trades",
+        series: styledSeries(ch.series), xType: state.impactLog ? "log" : "linear", yType: state.impactLog ? "log" : "linear", aria: c.title,
       });
     };
     $$(".seg button", panel).forEach((b) => b.addEventListener("click", () => {
@@ -486,54 +488,54 @@
       draw();
     }));
     draw();
-    rankChart($("#chartRank"), c.ranking, { showFamily: true, aria: tr("ranking", "排名") });
+    rankChart($("#chartRank"), c.ranking, { showFamily: true, aria: "ranking" });
   }
 
   function renderLoans(panel, c) {
-    const effects = c.panels.map((p, i) => card(`${esc(L(p.feature))}: ${esc(L(p.trend))}`,
-      `${tr("importance", "重要性")} ${pct(p.importance)} · ${tr("fold-to-fold curve correlation", "各折曲线相关")} ${p.stability == null ? "–" : p.stability.toFixed(2)}`, `<div id="effect${i}"></div>`)).join("");
-    const feats = c.features.map((f) => `<tr><td>${esc(L(f.name))}</td><td>${esc(L(f.trend))}</td><td class="num">${f.importance == null ? "–" : pct(f.importance)}</td><td class="num">${f.stability == null ? "–" : f.stability.toFixed(2)}</td></tr>`).join("");
+    const effects = c.panels.map((p, i) => card(`${esc(p.feature)}: ${esc(p.trend)}`,
+      `importance ${pct(p.importance)} · fold-to-fold curve correlation ${p.stability == null ? "–" : p.stability.toFixed(2)}`, `<div id="effect${i}"></div>`)).join("");
+    const feats = c.features.map((f) => `<tr><td>${esc(f.name)}</td><td>${esc(f.trend)}</td><td class="num">${f.importance == null ? "–" : pct(f.importance)}</td><td class="num">${f.stability == null ? "–" : f.stability.toFixed(2)}</td></tr>`).join("");
     panel.insertAdjacentHTML("beforeend",
       `<div class="grid-2 even">${effects}</div>`
-      + `<div class="grid-2">${card(tr("Model comparison and features", "模型比较与特征"), rankSub(),
+      + `<div class="grid-2">${card("Model comparison and features", RANK_SUB,
         '<div id="chartRank"></div>' + rankTable(c.ranking)
-        + `<div class="table-wrap" style="margin-top:12px"><table class="table mini"><thead><tr><th>${tr("feature", "特征")}</th><th>${tr("shape", "形状")}</th><th class="num">${tr("importance", "重要性")}</th><th class="num">${tr("fold corr.", "各折相关")}</th></tr></thead><tbody>${feats}</tbody></table></div>`)}${logCard(c)}</div>`);
+        + `<div class="table-wrap" style="margin-top:12px"><table class="table mini"><thead><tr><th>feature</th><th>shape</th><th class="num">importance</th><th class="num">fold corr.</th></tr></thead><tbody>${feats}</tbody></table></div>`)}${logCard(c)}</div>`);
     c.panels.forEach((p, i) => lineChart($(`#effect${i}`), {
-      xLabel: L(p.feature), yLabel: tr("contribution to logit(p)", "对 logit(p) 的贡献"), xShort: L(p.feature), height: 250,
-      series: styledSeries([{ label: { en: "fitted", zh: "拟合" }, x: p.x, y: p.fitted }, { label: { en: "ground truth", zh: "真实" }, x: p.x, y: p.truth, truth: true }]),
-      rug: p.rug, aria: L(p.feature),
+      xLabel: p.feature, yLabel: "contribution to logit(p)", xShort: p.feature, height: 250,
+      series: styledSeries([{ label: "fitted", x: p.x, y: p.fitted }, { label: "ground truth", x: p.x, y: p.truth, truth: true }]),
+      rug: p.rug, aria: p.feature,
     }));
-    rankChart($("#chartRank"), c.ranking, { aria: tr("model comparison", "模型比较") });
+    rankChart($("#chartRank"), c.ranking, { aria: "model comparison" });
   }
 
   function renderPath(panel, c) {
-    const checks = c.checks.map((k) => `<tr><td>${esc(L(k.name))}</td><td class="num">${esc(typeof k.value === "number" ? fmtNum(k.value, 3) : k.value)}</td><td class="num">${esc(k.rule)}</td>`
-      + `<td><span class="status ${k.pass ? "good" : "critical"}">${k.pass ? "✓ " + tr("pass", "满足") : "✗ " + tr("fail", "不满足")}</span></td></tr>`).join("");
+    const checks = c.checks.map((k) => `<tr><td>${esc(k.name)}</td><td class="num">${esc(typeof k.value === "number" ? fmtNum(k.value, 3) : k.value)}</td><td class="num">${esc(k.rule)}</td>`
+      + `<td><span class="status ${k.pass ? "good" : "critical"}">${k.pass ? "✓ pass" : "✗ fail"}</span></td></tr>`).join("");
     const r = c.rates;
     const rates = [
-      [tr("smooth exponential curve + noise", "平滑指数曲线 + 噪声"), r.false_positive.smooth, tr("false alarm", "误报")],
-      [tr("linear trend + noise", "线性趋势 + 噪声"), r.false_positive.linear, tr("false alarm", "误报")],
-      [tr("bond price–yield curve", "债券价格–收益率曲线"), r.false_positive.bond, tr("false alarm", "误报")],
-      [tr("GBM price path", "几何布朗运动路径"), r.detection.gbm, tr("detected", "识别")],
-      [tr("AR(1), φ = 0.95", "AR(1)，φ = 0.95"), r.detection.ar, tr("detected", "识别")],
+      ["smooth exponential curve + noise", r.false_positive.smooth, "false alarm"],
+      ["linear trend + noise", r.false_positive.linear, "false alarm"],
+      ["bond price–yield curve", r.false_positive.bond, "false alarm"],
+      ["GBM price path", r.detection.gbm, "detected"],
+      ["AR(1), φ = 0.95", r.detection.ar, "detected"],
     ].map(([n, v, kind]) => `<tr><td>${esc(n)}</td><td class="num">${pct(v)}</td><td class="sub">${esc(kind)}</td></tr>`).join("");
-    const dist = c.returns.ranking.map((d) => `<tr><td>${d.rec ? "★ " : ""}${esc(L(d.label))}</td><td class="num">${d.k}</td><td class="num">${fmtNum(d.d_aic, 3)}</td></tr>`).join("");
+    const dist = c.returns.ranking.map((d) => `<tr><td>${d.rec ? "★ " : ""}${esc(d.label)}</td><td class="num">${d.k}</td><td class="num">${fmtNum(d.d_aic, 3)}</td></tr>`).join("");
     panel.insertAdjacentHTML("beforeend",
-      `<div class="grid-2">${card(tr("A path that seems to have a shape", "一条看起来有形状的路径"), tr("The two best-scoring “curves” under rolling-origin CV. They fit — and mean nothing.", "滚动验证下得分最高的两条“曲线”：拟合得不错，但毫无意义。"), '<div id="chartMain"></div>')}${logCard(c)}</div>`
-      + `<div class="grid-2 even">${card(tr("Random-walk test", "随机游走检验"), tr("All four conditions must hold. Error rates measured on 200 simulated series each.", "四个条件必须同时满足。误报率和识别率各在 200 条模拟序列上测得。"),
-        `<div class="table-wrap"><table class="table mini"><thead><tr><th>${tr("statistic", "统计量")}</th><th class="num">${tr("value", "值")}</th><th class="num">${tr("rule", "规则")}</th><th></th></tr></thead><tbody>${checks}</tbody></table></div>`
-        + `<div class="table-wrap" style="margin-top:12px"><table class="table mini"><thead><tr><th>${tr("simulated series", "模拟序列")}</th><th class="num">${tr("rate", "比例")}</th><th></th></tr></thead><tbody>${rates}</tbody></table></div>`)}`
-      + card(tr("What it analyses instead: log returns", "转而分析：对数收益率"), tr("Histogram density with the two best distributions by AIC.", "直方图密度，叠加按 AIC 排名前二的分布。"),
-        '<div id="chartReturns"></div>' + `<div class="table-wrap" style="margin-top:10px"><table class="table mini"><thead><tr><th>${tr("distribution", "分布")}</th><th class="num">k</th><th class="num">ΔAIC</th></tr></thead><tbody>${dist}</tbody></table></div>`) + `</div>`);
+      `<div class="grid-2">${card("A path that seems to have a shape", "The two best-scoring “curves” under rolling-origin CV. They fit — and mean nothing.", '<div id="chartMain"></div>')}${logCard(c)}</div>`
+      + `<div class="grid-2 even">${card("Random-walk test", `All four conditions must hold. Error rates measured on ${r.n} simulated series each.`,
+        `<div class="table-wrap"><table class="table mini"><thead><tr><th>statistic</th><th class="num">value</th><th class="num">rule</th><th></th></tr></thead><tbody>${checks}</tbody></table></div>`
+        + `<div class="table-wrap" style="margin-top:12px"><table class="table mini"><thead><tr><th>simulated series</th><th class="num">rate</th><th></th></tr></thead><tbody>${rates}</tbody></table></div>`)}`
+      + card("What it analyses instead: log returns", "Histogram density with the two best distributions by AIC.",
+        '<div id="chartReturns"></div>' + `<div class="table-wrap" style="margin-top:10px"><table class="table mini"><thead><tr><th>distribution</th><th class="num">k</th><th class="num">ΔAIC</th></tr></thead><tbody>${dist}</tbody></table></div>`) + `</div>`);
     const ch = c.chart;
     const pal = PALETTE();
     lineChart($("#chartMain"), {
-      xLabel: L(ch.xLabel), yLabel: L(ch.yLabel), time: true, points: ch.points, pointsLabel: tr("monthly NAV", "月度净值"), yFromData: true,
-      series: ch.series.map((s, i) => ({ label: L(s.label), x: s.x, y: s.y, color: pal[i + 1], dash: DASHES[i + 1] })), aria: L(c.title),
+      xLabel: ch.xLabel, yLabel: ch.yLabel, time: true, points: ch.points, pointsLabel: "monthly NAV", yFromData: true,
+      series: ch.series.map((s, i) => ({ label: s.label, x: s.x, y: s.y, color: pal[i + 1], dash: DASHES[i + 1] })), aria: c.title,
     });
     lineChart($("#chartReturns"), {
-      xLabel: tr("monthly log return", "月度对数收益率"), yLabel: tr("density", "密度"), bars: c.returns.bins, barsLabel: tr("observed", "观测"), height: 240,
-      series: c.returns.series.map((s, i) => ({ label: L(s.label), x: s.x, y: s.y, color: pal[i], dash: DASHES[i] })), xShort: "r", aria: tr("returns", "收益率"),
+      xLabel: "monthly log return", yLabel: "density", bars: c.returns.bins, barsLabel: "observed", height: 240,
+      series: c.returns.series.map((s, i) => ({ label: s.label, x: s.x, y: s.y, color: pal[i], dash: DASHES[i] })), xShort: "r", aria: "returns",
     });
   }
 
@@ -545,67 +547,64 @@
   }
 
   // ---------------------------------------------------------------- scoreboard
-  const VERDICT = {
-    hit: ["good", "✓", ["recovered", "识别正确"]],
-    tie: ["warning", "≈", ["tied with truth", "与真实形式并列"]],
-    miss: ["critical", "✗", ["missed", "未识别"]],
-  };
-  const MODE = { curve: ["curve", "曲线"], distribution: ["distribution", "分布"], guardrail: ["guardrail", "护栏"], additive: ["multi-feature", "多特征"] };
+  const VERDICT = { hit: ["good", "✓", "recovered"], tie: ["warning", "≈", "tied with truth"], miss: ["critical", "✗", "missed"] };
+  const MODE = { curve: "curve", distribution: "distribution", guardrail: "guardrail", additive: "multi-feature" };
   function renderScoreboard() {
     const rows = D.scoreboard;
     const count = (v) => rows.filter((r) => r.verdict === v).length;
-    $("#scoreSummary").innerHTML = ["hit", "tie", "miss"].map((v) => `<span class="status ${VERDICT[v][0]}">${VERDICT[v][1]} ${count(v)} ${esc(tr(VERDICT[v][2][0], VERDICT[v][2][1]))}</span>`).join("");
-    $("#scoreTable").innerHTML = `<thead><tr><th>#</th><th>${tr("scenario", "场景")}</th><th>${tr("mode", "模式")}</th><th>${tr("ground truth", "真实模型")}</th><th>${tr("identified", "识别结果")}</th><th>${tr("verdict", "结论")}</th><th>${tr("detail", "说明")}</th></tr></thead><tbody>`
+    $("#scoreSummary").innerHTML = ["hit", "tie", "miss"].map((v) => `<span class="status ${VERDICT[v][0]}">${VERDICT[v][1]} ${count(v)} ${VERDICT[v][2]}</span>`).join("");
+    $("#scoreTable").innerHTML = `<thead><tr><th>#</th><th>scenario</th><th>mode</th><th>ground truth</th><th>identified</th><th>verdict</th><th>detail</th></tr></thead><tbody>`
       + rows.map((r, i) => {
         const v = VERDICT[r.verdict];
-        return `<tr><td class="num">${String(i + 1).padStart(2, "0")}</td><td>${esc(L(r.name))}</td><td><span class="mode">${esc(tr(MODE[r.mode][0], MODE[r.mode][1]))}</span></td>`
-          + `<td>${esc(L(r.truth))}</td><td>${esc(L(r.identified))}</td><td><span class="status ${v[0]}">${v[1]} ${esc(tr(v[2][0], v[2][1]))}</span></td><td class="sub">${esc(L(r.detail))}</td></tr>`;
+        return `<tr><td class="num">${String(i + 1).padStart(2, "0")}</td><td>${esc(r.name)}</td><td><span class="mode">${esc(MODE[r.mode])}</span></td>`
+          + `<td>${esc(r.truth)}</td><td>${esc(r.identified)}</td><td><span class="status ${v[0]}">${v[1]} ${v[2]}</span></td><td class="sub">${esc(r.detail)}</td></tr>`;
       }).join("") + "</tbody>";
+  }
+
+  // ---------------------------------------------------------------- performance
+  function renderPerformance() {
+    const b = D.benchmark;
+    const section = $("#performance");
+    if (!b) { section.hidden = true; return; }
+    $("#perfStats").innerHTML = [
+      [`${b.total_speedup.toFixed(1)}×`, "less total time over 11 workloads"],
+      [`${b.max_speedup.toFixed(0)}×`, `largest gain: ${b.max_label}`],
+      [`${b.kernel_speedup.toFixed(0)}×`, "C smoother vs NumPy (n = 3,000)"],
+      [`${b.same}/${b.rows.length}`, "identical recommendations"],
+    ].map(([v, l]) => `<div class="stat"><b class="mono">${v}</b><span>${esc(l)}</span></div>`).join("");
+    speedChart($("#perfChart"), b.rows);
+    $("#perfMachine").textContent = b.machine;
   }
 
   // ---------------------------------------------------------------- library
   function renderLibrary() {
     const present = new Set(D.library.map((f) => f.group));
-    const groups = [{ key: "all", label: { en: "All", zh: "全部" } }].concat(D.groups.filter((g) => present.has(g.key)));
-    $("#libChips").innerHTML = groups.map((g) => `<button class="chipbtn" type="button" data-g="${g.key}" aria-pressed="${state.libGroup === g.key}">${esc(L(g.label))}</button>`).join("");
+    const groups = [{ key: "all", label: "all" }].concat(D.groups.filter((g) => present.has(g.key)));
+    $("#libChips").innerHTML = groups.map((g) => `<button class="chipbtn" type="button" data-g="${g.key}" aria-pressed="${state.libGroup === g.key}">${esc(g.label)}</button>`).join("");
     $$("#libChips .chipbtn").forEach((b) => b.addEventListener("click", () => { state.libGroup = b.dataset.g; renderLibrary(); }));
     const q = state.libQuery.trim().toLowerCase();
     const items = D.library.filter((f) => (state.libGroup === "all" || f.group === state.libGroup)
-      && (!q || [f.key, f.formula, f.label.en, f.label.zh, f.meaning.en, f.meaning.zh].join(" ").toLowerCase().includes(q)));
-    $("#libGrid").innerHTML = items.length ? items.map((f) => `<div class="form"><div class="form-top"><b>${esc(L(f.label))}</b><span class="meta">${esc(L(f.groupLabel))}</span></div>`
-      + `<code>${esc(f.formula)}</code><p>${esc(L(f.meaning))}</p><span class="meta">key: ${esc(f.key)} · k = ${f.k}</span></div>`).join("")
-      : `<p class="note">${tr("No form matches.", "没有匹配的形式。")}</p>`;
+      && (!q || [f.key, f.formula, f.label, f.meaning].join(" ").toLowerCase().includes(q)));
+    $("#libGrid").innerHTML = items.length ? items.map((f) => `<div class="form"><div class="form-top"><b>${esc(f.label)}</b><span class="meta">${esc(f.groupLabel)}</span></div>`
+      + `<code>${esc(f.formula)}</code><p>${esc(f.meaning)}</p><span class="meta">key: ${esc(f.key)} · k = ${f.k} · ${f.separable ? "variable projection" : "general least squares"}</span></div>`).join("")
+      : `<p class="note">No form matches.</p>`;
   }
 
   // ---------------------------------------------------------------- wiring
-  function renderAll(animateTerm) {
-    applyStatic();
-    renderStats();
-    renderHeroTerm(animateTerm);
-    renderTabs();
-    renderCase();
-    renderScoreboard();
-    renderLibrary();
-  }
-
   $("#version").textContent = "v" + D.version;
   $("#generated").textContent = D.generated;
-  $("#langBtn").addEventListener("click", () => {
-    state.lang = state.lang === "zh" ? "en" : "zh";
-    store.set("fc-lang", state.lang);
-    renderAll(false);
-  });
   $("#themeBtn").addEventListener("click", () => {
     const next = root.getAttribute("data-theme") === "light" ? "dark" : "light";
     root.setAttribute("data-theme", next);
     store.set("fc-theme", next);
     renderCase();
+    renderPerformance();
   });
   $("#libSearch").addEventListener("input", (ev) => { state.libQuery = ev.target.value; renderLibrary(); });
   $$(".copy").forEach((b) => b.addEventListener("click", async () => {
     const text = $("#" + b.dataset.target).innerText;
-    try { await navigator.clipboard.writeText(text); b.textContent = tr("copied", "已复制"); }
-    catch (e) { b.textContent = tr("select & copy", "请手动复制"); }
+    try { await navigator.clipboard.writeText(text); b.textContent = "copied"; }
+    catch (e) { b.textContent = "select & copy"; }
     setTimeout(() => { b.textContent = "copy"; }, 1400);
   }));
 
@@ -615,7 +614,7 @@
     if (Math.abs(w - lastWidth) < 4) return;
     lastWidth = w;
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(renderCase, 120);
+    resizeTimer = setTimeout(() => { renderCase(); renderPerformance(); }, 120);
   }).observe($("#casePanel"));
 
   const deep = /^#case-(\w+)$/.exec(location.hash);
@@ -623,6 +622,12 @@
     const i = D.cases.findIndex((c) => c.id === deep[1]);
     if (i >= 0) state.caseIdx = i;
   }
-  renderAll(true);
+  renderStats();
+  renderHeroTerm();
+  renderTabs();
+  renderCase();
+  renderScoreboard();
+  renderPerformance();
+  renderLibrary();
   if (deep) $("#cases").scrollIntoView();
 })();

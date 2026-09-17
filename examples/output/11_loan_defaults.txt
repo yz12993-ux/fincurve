@@ -1,23 +1,24 @@
-══ fincurve 刻画报告：多特征模式（是否违约 对 3 个特征）══
-【数据画像】
-· 样本 4000 个；y：0/1 二元结果
-· 特征：2 个数值特征，1 个剔除的特征
-【自动选择】
-· 误差模型：概率/比例（二项）——y 只有 0 和 1，用二项（伯努利）似然
-· 验证方式：随机 K 折，5 次切分——数据没有时间顺序
-· 形状搜索：每个数值特征从线性、二次、三次、对数、平方根、反比、幂律、指数、S 形、单峰、折线中选择，AIC 至少下降 4 才换形状；交互项 AIC 至少下降 10 才加入
-· 交叉验证在每一折里重新选择形状（嵌套），分数没有被形状搜索美化
-【排名】（ΔCV-NLL = 与最优模型相比、每个观测的留出负对数似然之差；★ 推荐；= 与最优的差距在 2 个标准误以内）
-★ 1. 加性形状模型                  k= 5  ΔCV-NLL=       0 ±0       CV-RMSE=   0.367  ΔAIC=    0.0
-  2. 全线性（GLM 基准）             k= 3  ΔCV-NLL=  0.0102 ±0.0026  CV-RMSE=   0.371  ΔAIC=   80.7
-  3. K 近邻（非参数参照）             k= -  ΔCV-NLL=      参照 ±0.011   CV-RMSE=       -
-【推荐模型：加性形状模型】
-· 负债收入比［数值］：S 形上升（中间陡、两端平）（S 形（阈值切换）），重要性 85%，各折效应曲线相关 1.00
-· 额度使用率［数值］：近似线性上升（线性），重要性 15%，各折效应曲线相关 1.00
-· 行号：已剔除——连续整数且每行唯一：像行号或 ID，放进模型会造成泄漏
-【需要注意】
-· 特征“行号”已剔除：连续整数且每行唯一：像行号或 ID，放进模型会造成泄漏
-【备注】
-· “负债收入比”：线性 → S 形（阈值切换）（全样本 AIC 下降 80.7）
+== fincurve report: multi-feature mode (default vs 3 features) ==
+[Data profile]
+  - 4000 observations; y: binary 0/1 outcome
+  - features: 2 numeric, 1 removed
+[Automatic choices]
+  - error model: proportions (binomial) — y takes only the values 0 and 1: Bernoulli likelihood
+  - validation: shuffled K-fold, 5 splits — no time ordering
+  - shape search: each numeric feature chooses among linear, quadratic, cubic, log, square root, reciprocal, power, exponential, sigmoid, peak and hinge; a shape is accepted only if AIC drops by at least 4, and an interaction only if AIC drops by at least 10
+  - the shape search is repeated inside every fold (nested), so the score is not flattered by it
+[Ranking]  ΔCV-NLL = held-out negative log-likelihood per row relative to the best model;
+           * recommended, = practically tied with the best (within 2 paired SE and 0.1 nats)
+* 1. Additive shape model                        k= 5  ΔCV-NLL=        0 ±0        CV-RMSE=   0.367  ΔAIC=    0.0
+  2. All-linear GLM (baseline)                   k= 3  ΔCV-NLL=   0.0102 ±0.0026   CV-RMSE=   0.371  ΔAIC=   80.7
+  3. k-nearest neighbours (reference)            k= -  ΔCV-NLL=reference ±0.011    CV-RMSE=       -
+[Recommended model: Additive shape model]
+  - debt_to_income [numeric]: S-shaped rise (sigmoid (threshold)), importance 85%, fold-to-fold curve correlation 1.00
+  - utilization [numeric]: roughly linear rise (linear), importance 15%, fold-to-fold curve correlation 1.00
+  - row_number: removed — consecutive unique integers: looks like a row number or ID and would leak
+[Warnings]
+  - feature 'row_number' was removed: consecutive unique integers: looks like a row number or ID and would leak
+[Notes]
+  - 'debt_to_income': linear → sigmoid (threshold) (full-sample AIC −80.7)
 
-（耗时 9.7 秒）
+(elapsed 0.9s)

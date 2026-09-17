@@ -1,36 +1,37 @@
-══ fincurve 刻画报告：曲线模式（收益率 (%) 对 期限（年））══
-【数据画像】
-· 样本 13 个
-· y：正的连续值，范围 [4.13, 5.053]
-· 形状：单调下降；局部平滑能解释 100% 的变化
-· 噪声：大致恒定
-【自动选择】
-· 误差模型：加性误差（正态）——y 为正但跨度不大、噪声大致恒定，用加性误差
-· 验证方式：留一法，13 次切分——样本只有 13 个，用留一法
-· 候选：比较了 30 个函数，跳过 2 个（定义域或样本量不满足）
-【排名】（ΔCV-NLL = 与最优模型相比、每个观测的留出负对数似然之差；★ 推荐；= 与最优的差距在 2 个标准误以内）
-★ 1. 指数趋近                    k= 4  ΔCV-NLL=       0 ±0       CV-RMSE=  0.0265  ΔAIC=    3.0
-= 2. Gompertz                k= 5  ΔCV-NLL=0.000118 ±0.00023  CV-RMSE=  0.0265  ΔAIC=    5.0
-= 3. 逻辑斯蒂                    k= 5  ΔCV-NLL=0.000277 ±0.00045  CV-RMSE=  0.0265  ΔAIC=    5.0
-= 4. 高斯峰                     k= 5  ΔCV-NLL=  0.0716 ±0.17    CV-RMSE=  0.0276  ΔAIC=    5.3
-  5. 平滑曲棍球杆                  k= 6  ΔCV-NLL=   0.264 ±0.41    CV-RMSE=  0.0262  ΔAIC=    2.4
-  6. 洛伦兹峰                    k= 5  ΔCV-NLL=   0.343 ±0.19    CV-RMSE=  0.0352  ΔAIC=   11.8
-  7. Nelson–Siegel           k= 5  ΔCV-NLL=   0.432 ±0.75    CV-RMSE=  0.0249  ΔAIC=    0.0
-  8. Hill 饱和                 k= 5  ΔCV-NLL=   0.493 ±0.21    CV-RMSE=  0.0408  ΔAIC=   14.5
-  9. Heston 波动率期限结构          k= 4  ΔCV-NLL=   0.585 ±0.3     CV-RMSE=  0.0447  ΔAIC=   16.7
- 10. 双指数                     k= 6  ΔCV-NLL=   0.739 ±0.82    CV-RMSE=  0.0277  ΔAIC=    1.7
-【推荐】
-· 指数趋近［加性误差（正态）］：c + a·e^(−κ·u)
-· 含义：均值回复、向长期水平收敛（波动率/利差期限结构）
-· 参数：c = 4.162，a = 0.8883，κ = 20.08（u = (x − 最小值)/全距）
-· 理由：交叉验证分数最优，且与其并列的 3 个模型参数都不比它少；样本内 R² = 0.996
-【需要注意】
-· 并列模型分属不同类型（指数增长/衰减、S 形、峰形）：数据本身区分不了这些含义不同的形状，要结合经济含义选择，或补充 x 范围更宽的数据
-· 样本只有 13 个：排名很不稳定，只作参考
-【备注】
-· 与最优模型没有实质差距的共有 4 个：指数趋近、Gompertz、逻辑斯蒂、高斯峰
-· x 的名字提示这是期限结构：该语境的专用形式“Nelson–Siegel”排第 7（比最优差 0.432 ± 0.75）。专用形式的参数有明确经济含义，差距不大时可以优先使用
-· x 有大段空白（最大间隔占全距 33%）：空白区间里的形状没有数据支撑
-· 因定义域或样本量跳过的候选：sine_trend、svensson
+== fincurve report: curve mode (yield (%) vs tenor (years)) ==
+[Data profile]
+  - 13 observations
+  - y: positive continuous value, range [4.13, 5.053]
+  - shape: decreasing; a local smoother explains 100% of the variation
+  - noise: roughly constant
+[Automatic choices]
+  - error model: additive errors (Gaussian) — y is positive with a narrow range and constant noise: additive errors
+  - validation: leave-one-out, 13 splits — only 13 observations: leave-one-out
+  - candidates: 30 fitted, 2 skipped (domain or sample size)
+[Ranking]  ΔCV-NLL = held-out negative log-likelihood per row relative to the best model;
+           * recommended, = practically tied with the best (within 2 paired SE and 0.1 nats)
+* 1. Exponential approach                        k= 4  ΔCV-NLL=        0 ±0        CV-RMSE=  0.0265  ΔAIC=    3.0
+= 2. Gompertz                                    k= 5  ΔCV-NLL= 0.000937 ±0.001    CV-RMSE=  0.0265  ΔAIC=    5.0
+= 3. Logistic                                    k= 5  ΔCV-NLL=    0.058 ±0.057    CV-RMSE=  0.0272  ΔAIC=    5.0
+= 4. Gaussian peak                               k= 5  ΔCV-NLL=   0.0715 ±0.17     CV-RMSE=  0.0276  ΔAIC=    5.3
+  5. Soft hockey stick                           k= 6  ΔCV-NLL=    0.264 ±0.41     CV-RMSE=  0.0262  ΔAIC=    2.4
+  6. Lorentzian peak                             k= 5  ΔCV-NLL=    0.343 ±0.19     CV-RMSE=  0.0352  ΔAIC=   11.8
+  7. Nelson–Siegel                               k= 5  ΔCV-NLL=    0.432 ±0.75     CV-RMSE=  0.0249  ΔAIC=    0.0
+  8. Hill saturation                             k= 5  ΔCV-NLL=    0.493 ±0.21     CV-RMSE=  0.0408  ΔAIC=   14.5
+  9. Heston vol term structure                   k= 4  ΔCV-NLL=    0.585 ±0.3      CV-RMSE=  0.0447  ΔAIC=   16.7
+ 10. Double exponential                          k= 6  ΔCV-NLL=    0.739 ±0.82     CV-RMSE=  0.0277  ΔAIC=    1.7
+[Recommendation]
+  - Exponential approach [additive errors (Gaussian)]: c + a·e^(−κ·u)
+  - meaning: mean reversion to a long-run level (vol and spread term structures)
+  - parameters: c = 4.162, a = 0.8883, κ = 20.08 (u = (x − min) / range)
+  - why: best cross-validated score, and none of the 3 tied models has fewer parameters; in-sample R² = 0.996
+[Warnings]
+  - the tied models belong to different families (growth / decay, sigmoid, peak): the data cannot tell these shapes apart — choose on economic grounds or collect a wider x range
+  - only 13 observations: the ranking is unstable, treat it as indicative
+[Notes]
+  - 4 models are practically tied with the best: Exponential approach, Gompertz, Logistic, Gaussian peak
+  - the name of x suggests a term structure: the specialised form 'Nelson–Siegel' ranks #7 (0.432 ± 0.75 behind the best). Its parameters have a direct economic meaning, so prefer it when the gap is small
+  - x has a large gap (the widest spans 33% of its range): the shape inside the gap is unsupported
+  - candidates skipped because of their domain or the sample size: sine_trend, svensson
 
-（耗时 3.1 秒）
+(elapsed 0.5s)

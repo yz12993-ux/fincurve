@@ -1,20 +1,20 @@
-══ fincurve 刻画报告：分布模式（日收益率 (%)）══
-【数据画像】
-· 样本 2520 个；均值 -0.0391，标准差 1.11
-· 偏度 0.16，超额峰度 3.12（正态为 0）
-【排名】（按 AIC；★ 推荐，= 与最优相差不到 2；尾部误差：负数 = 模型尾部比实际薄，正数 = 偏厚）
-★ 1. Student-t      k=3  ΔAIC=     0.0  KS=0.010  左尾(1%) -0%  右尾(99%) -3%
-= 2. Johnson SU     k=4  ΔAIC=     1.4  KS=0.010  左尾(1%) +2%  右尾(99%) -4%
-  3. 正态逆高斯 NIG      k=4  ΔAIC=     3.9  KS=0.012  左尾(1%) +1%  右尾(99%) -4%
-  4. Logistic       k=2  ΔAIC=    20.6  KS=0.013  左尾(1%) -8%  右尾(99%) -10%
-  5. Laplace        k=2  ΔAIC=    59.1  KS=0.036  左尾(1%) +8%  右尾(99%) +7%
-  6. 偏正态            k=3  ΔAIC=   212.6  KS=0.043  左尾(1%) -14%  右尾(99%) -12%
-  7. 正态             k=2  ΔAIC=   221.1  KS=0.043  左尾(1%) -12%  右尾(99%) -14%
-【推荐】
-· Student-t：对称厚尾：日收益率最常用
-· 1% / 99% 分位数：-2.971 / 2.901（经验值 -2.984 / 2.982）
-· 尾部误差 = 模型分位数到中位数的距离 ÷ 经验分位数到中位数的距离 − 1
-【备注】
-· 超额峰度 3.1：正态分布比最优分布差 ΔAIC = 221，尾部明显更厚
+== fincurve report: distribution mode (daily return (%)) ==
+[Data profile]
+  - 2520 observations; mean -0.0391, standard deviation 1.11
+  - skewness 0.16, excess kurtosis 3.12 (0 for a normal distribution)
+[Ranking]  by AIC; * recommended, = within 2 of the best; tail error < 0 means the model's tail is too thin
+* 1. Student-t                k=3  ΔAIC=     0.0  KS=0.010  left tail (1%) -0%  right tail (99%) -3%
+= 2. Johnson SU               k=4  ΔAIC=     1.4  KS=0.010  left tail (1%) +2%  right tail (99%) -4%
+  3. Normal-inverse Gaussian  k=4  ΔAIC=     3.9  KS=0.012  left tail (1%) +1%  right tail (99%) -4%
+  4. Logistic                 k=2  ΔAIC=    20.6  KS=0.013  left tail (1%) -8%  right tail (99%) -10%
+  5. Laplace                  k=2  ΔAIC=    59.1  KS=0.036  left tail (1%) +8%  right tail (99%) +7%
+  6. Skew-normal              k=3  ΔAIC=   212.6  KS=0.043  left tail (1%) -14%  right tail (99%) -12%
+  7. Normal                   k=2  ΔAIC=   221.1  KS=0.043  left tail (1%) -12%  right tail (99%) -14%
+[Recommendation]
+  - Student-t: symmetric heavy tails: the usual choice for daily returns
+  - 1% / 99% quantiles: -2.971 / 2.901 (empirical -2.984 / 2.982)
+  - tail error = distance of the model quantile from the median ÷ distance of the empirical quantile − 1
+[Notes]
+  - excess kurtosis 3.1: the normal distribution is ΔAIC = 221 behind the best — the tails are clearly heavier
 
-（耗时 0.4 秒）
+(elapsed 0.5s)

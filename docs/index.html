@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>fincurve — let held-out likelihood pick the curve</title>
-  <meta name="description" content="Open-source Python tool that profiles financial data, fits 32 candidate forms (Nelson–Siegel, SVI, hazard curves, power laws…) and ranks them by cross-validated likelihood.">
+  <meta name="description" content="Open-source Python library that profiles financial data, fits 32 candidate forms (Nelson–Siegel, SVI, hazard curves, power laws…) by variable projection with C kernels, and ranks them by cross-validated likelihood.">
   <meta property="og:title" content="fincurve — let held-out likelihood pick the curve">
   <meta property="og:description" content="Profiles the data, picks the noise model and validation scheme, ranks 32 candidate forms by held-out likelihood, and refuses to fit curves to random walks.">
   <meta property="og:type" content="website">
@@ -28,18 +28,18 @@
     <div class="container nav-inner">
       <a class="brand" href="#top" aria-label="fincurve home">
         <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--surface)" stroke="var(--line-2)"/><path d="M5 23c5 0 6-13 12-13s6 7 10 5" stroke="var(--s1)" stroke-width="3" fill="none" stroke-linecap="round"/><circle cx="9" cy="20" r="1.8" fill="var(--s3)"/><circle cx="21" cy="12" r="1.8" fill="var(--s3)"/></svg>
-        <span>fincurve</span><span class="chip mono" id="version">v0.1.0</span>
+        <span>fincurve</span><span class="chip mono" id="version">v0.2.0</span>
       </a>
       <nav class="nav-links" aria-label="Sections">
-        <a href="#pipeline" data-i18n="nav.pipeline">Pipeline</a>
-        <a href="#cases" data-i18n="nav.cases">Case studies</a>
-        <a href="#scoreboard" data-i18n="nav.scoreboard">Scoreboard</a>
-        <a href="#method" data-i18n="nav.method">Method</a>
-        <a href="#library" data-i18n="nav.library">Library</a>
-        <a href="#start" data-i18n="nav.start">Quick start</a>
+        <a href="#pipeline">Pipeline</a>
+        <a href="#cases">Case studies</a>
+        <a href="#scoreboard">Scoreboard</a>
+        <a href="#performance">Performance</a>
+        <a href="#method">Method</a>
+        <a href="#library">Library</a>
+        <a href="#start">Quick start</a>
       </nav>
       <div class="nav-actions">
-        <button class="btn-ghost sm mono" id="langBtn" type="button" aria-label="Switch language">中文</button>
         <button class="btn-ghost icon" id="themeBtn" type="button" aria-label="Toggle light or dark theme">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.6 6.6 0 0 0 9.8 9.8z"/></svg>
         </button>
@@ -55,12 +55,12 @@
     <section class="hero">
       <div class="container hero-grid">
         <div>
-          <div class="eyebrow mono"><span class="dot"></span><span data-i18n="hero.eyebrow">open source · python · MIT</span></div>
-          <h1 data-i18n="hero.title">Which curve does your financial data <span class="grad">actually</span> follow?</h1>
-          <p class="lead" data-i18n="hero.lead">fincurve profiles the data, picks the right noise model and validation scheme, fits 32 candidate forms — from Nelson–Siegel and SVI to hazard curves and power laws — and ranks them by <b>held-out likelihood</b>. It also knows when <b>not</b> to fit a curve.</p>
+          <div class="eyebrow mono"><span class="dot"></span><span>open source · python · C kernels · MIT</span></div>
+          <h1>Which curve does your financial data <span class="grad">actually</span> follow?</h1>
+          <p class="lead">fincurve profiles the data, picks the right noise model and validation scheme, fits 32 candidate forms — from Nelson–Siegel and SVI to hazard curves and power laws — and ranks them by <b>held-out likelihood</b>. It also knows when <b>not</b> to fit a curve.</p>
           <div class="cta">
-            <a class="btn-primary" href="https://github.com/yz12993-ux/fincurve" target="_blank" rel="noopener"><span data-i18n="hero.cta1">View on GitHub</span></a>
-            <a class="btn-ghost" href="#cases"><span data-i18n="hero.cta2">See it recover known models</span>&nbsp;→</a>
+            <a class="btn-primary" href="https://github.com/yz12993-ux/fincurve" target="_blank" rel="noopener">View on GitHub</a>
+            <a class="btn-ghost" href="#cases">See it recover known models&nbsp;→</a>
           </div>
           <div class="stats" id="stats"></div>
         </div>
@@ -75,16 +75,16 @@
       <div class="container">
         <div class="section-head">
           <div class="kicker mono">// 01 — pipeline</div>
-          <h2 data-i18n="pipe.title">Six steps from raw data to a defensible choice</h2>
-          <p data-i18n="pipe.sub">Every decision is made from the data and written into the report, so you can audit why a form won.</p>
+          <h2>Six steps from raw data to a defensible choice</h2>
+          <p>Every decision is made from the data and written into the report, so you can audit why a form won.</p>
         </div>
         <ol class="pipeline">
-          <li><span class="step mono">01</span><h3 data-i18n="pipe.s1">Profile</h3><p data-i18n="pipe.s1d">Target type, shape, noise versus level, time ordering, and finance context read from the column name.</p></li>
-          <li><span class="step mono">02</span><h3 data-i18n="pipe.s2">Likelihood</h3><p data-i18n="pipe.s2d">Gaussian, log-normal, binomial or Poisson. When unclear, additive and multiplicative noise compete.</p></li>
-          <li><span class="step mono">03</span><h3 data-i18n="pipe.s3">Validation</h3><p data-i18n="pipe.s3d">Shuffled K-fold, rolling-origin for time series, grouped folds, or leave-one-out for tiny samples.</p></li>
-          <li><span class="step mono">04</span><h3 data-i18n="pipe.s4">Fit</h3><p data-i18n="pipe.s4d">32 forms × multi-start bounded least squares. Linear coefficients are solved on grids for stable starts.</p></li>
-          <li><span class="step mono">05</span><h3 data-i18n="pipe.s5">Rank</h3><p data-i18n="pipe.s5d">Held-out NLL per row. A tie needs both 2 paired SE and a 0.1-nat gap; the simplest tie wins.</p></li>
-          <li><span class="step mono">06</span><h3 data-i18n="pipe.s6">Guardrails</h3><p data-i18n="pipe.s6d">Random walks, half-peaks, extrapolation disagreement, heavy tails, leakage, volatility clustering.</p></li>
+          <li><span class="step mono">01</span><h3>Profile</h3><p>Target type, shape, noise versus level, time ordering, and finance context read from the column name.</p></li>
+          <li><span class="step mono">02</span><h3>Likelihood</h3><p>Gaussian, log-normal, binomial or Poisson. When unclear, additive and multiplicative noise compete.</p></li>
+          <li><span class="step mono">03</span><h3>Validation</h3><p>Shuffled K-fold, rolling-origin for time series, grouped folds, or leave-one-out for tiny samples.</p></li>
+          <li><span class="step mono">04</span><h3>Fit</h3><p>Variable projection: linear coefficients solved exactly (least squares, IRLS), the optimiser only moves 0–2 nonlinear parameters.</p></li>
+          <li><span class="step mono">05</span><h3>Rank</h3><p>Held-out NLL per row. A tie needs both 2 paired SE and a 0.1-nat gap; the simplest tie wins.</p></li>
+          <li><span class="step mono">06</span><h3>Guardrails</h3><p>Random walks, half-peaks, extrapolation disagreement, heavy tails, leakage, volatility clustering.</p></li>
         </ol>
       </div>
     </section>
@@ -93,8 +93,8 @@
       <div class="container">
         <div class="section-head">
           <div class="kicker mono">// 02 — case studies</div>
-          <h2 data-i18n="cases.title">Four datasets with a known answer</h2>
-          <p data-i18n="cases.sub">Each dataset is simulated from a known model, so we can check whether fincurve recovers it. Every point, curve, ranking row and log line below is exported from real runs of the library.</p>
+          <h2>Four datasets with a known answer</h2>
+          <p>Each dataset is simulated from a known model, so we can check whether fincurve recovers it. Every point, curve, ranking row and log line below is exported from real runs of the library.</p>
         </div>
         <div class="tabs" role="tablist" id="caseTabs" aria-label="Case studies"></div>
         <div id="casePanel" role="tabpanel"></div>
@@ -105,44 +105,77 @@
       <div class="container">
         <div class="section-head">
           <div class="kicker mono">// 03 — scoreboard</div>
-          <h2 data-i18n="score.title">All eleven scenarios, including the misses</h2>
-          <p data-i18n="score.sub">Same seed, default settings, no tuning. When the truth is not recommended, the table shows where it ranked and why the data could not decide.</p>
+          <h2>All eleven scenarios, including the misses</h2>
+          <p>Same seed, default settings, no tuning. When the truth is not recommended, the table shows where it ranked and why the data could not decide.</p>
         </div>
         <div class="score-summary" id="scoreSummary"></div>
         <div class="table-wrap"><table class="table" id="scoreTable"></table></div>
       </div>
     </section>
 
+    <section id="performance" class="section">
+      <div class="container">
+        <div class="section-head">
+          <div class="kicker mono">// 04 — performance</div>
+          <h2>Same answers, a fraction of the time</h2>
+          <p>v0.2.0 replaced general least squares over every parameter with variable projection, moved the local-linear smoother into C, and swapped brute-force neighbour search for a KD-tree. Every benchmark workload returns the same recommendation as before.</p>
+        </div>
+        <div class="stats wide" id="perfStats"></div>
+        <div class="grid-2 perf">
+          <div class="card">
+            <div class="card-head"><div><h3>Benchmark: v0.1.0 → v0.2.0</h3><p id="perfMachine"></p></div></div>
+            <div id="perfChart"></div>
+          </div>
+          <div class="card">
+            <div class="card-kicker mono">what changed</div>
+            <ul class="checks">
+              <li><b>Variable projection.</b> 30 of 32 forms are B(x, θ)·β. β is solved exactly, so linear forms are one matrix solve and nonlinear ones search only θ.</li>
+              <li><b>Likelihood-aware inner solvers.</b> Weighted least squares, Gauss–Newton for log-normal errors, IRLS for binomial and Poisson targets.</li>
+              <li><b>C kernel.</b> The tricube local-linear smoother walks a sorted window in C: O(n·m) instead of a NumPy partition per point, with a pure-NumPy fallback.</li>
+              <li><b>KD-tree reference.</b> The k-nearest-neighbour benchmark uses scipy's cKDTree with parallel queries.</li>
+              <li><b>Optional processes.</b> <code class="mono">n_jobs=-1</code> fans candidates or nested folds out across cores for heavy workloads.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section id="method" class="section">
       <div class="container">
         <div class="section-head">
-          <div class="kicker mono">// 04 — method</div>
-          <h2 data-i18n="method.title">How a winner is chosen</h2>
-          <p data-i18n="method.sub">Not R². Held-out likelihood, a paired standard error, and a practical-equivalence gap.</p>
+          <div class="kicker mono">// 05 — method</div>
+          <h2>How a winner is chosen</h2>
+          <p>Not R². Held-out likelihood, a paired standard error, and a practical-equivalence gap.</p>
         </div>
         <div class="method-grid">
           <article class="card">
             <div class="card-kicker mono">score</div>
-            <h3 data-i18n="m1.t">Held-out likelihood, per row</h3>
+            <h3>Held-out likelihood, per row</h3>
             <div class="formula mono">ℓ̄<sub>m</sub> = (1/n) Σ<sub>i</sub> −log p<sub>m</sub>(y<sub>i</sub> | x<sub>i</sub>, θ̂<sub>−fold(i)</sub>)</div>
-            <p data-i18n="m1.d">Parameters are refit without the fold that contains row i. Gaussian, log-normal, binomial and Poisson models share one scale, so additive and multiplicative noise compete directly.</p>
+            <p>Parameters are refit without the fold that contains row i. Gaussian, log-normal, binomial and Poisson models share one scale, so additive and multiplicative noise compete directly.</p>
           </article>
           <article class="card">
             <div class="card-kicker mono">tie rule</div>
-            <h3 data-i18n="m2.t">Two conditions for a tie</h3>
+            <h3>Two conditions for a tie</h3>
             <div class="formula mono">Δ<sub>m</sub> ≤ 2·SE<sub>paired</sub> &nbsp;∧&nbsp; Δ<sub>m</sub> ≤ 0.1 nats &nbsp;⇒&nbsp; argmin<sub>tied</sub> k</div>
-            <p data-i18n="m2.d">The paired standard error uses per-row differences against the best model. The 0.1-nat gap (≈10% RMSE under Gaussian errors) stops small samples from declaring everything equal. Among tied models, the one with the fewest parameters is recommended.</p>
+            <p>The paired standard error uses per-row differences against the best model. The 0.1-nat gap (≈10% RMSE under Gaussian errors) stops small samples from declaring everything equal. Among tied models, the one with the fewest parameters is recommended.</p>
+          </article>
+          <article class="card">
+            <div class="card-kicker mono">variable projection</div>
+            <h3>Solve what is linear, search what is not</h3>
+            <div class="formula mono">θ̂ = argmin<sub>θ</sub> −ℓ(y | B(x, θ) β̂(θ)),&nbsp; β̂(θ) = argmax<sub>β</sub> ℓ(y | B(x, θ) β)</div>
+            <p>The inner problem is exact or converges in a few IRLS steps; the outer problem has at most two dimensions for the curve library, which also makes it far less prone to local minima than a joint search.</p>
           </article>
           <article class="card">
             <div class="card-kicker mono">nested cv</div>
-            <h3 data-i18n="m3.t">Shape search inside every fold</h3>
+            <h3>Shape search inside every fold</h3>
             <div class="formula mono">for k in folds: shapes<sub>k</sub> = search(train<sub>k</sub>); score(test<sub>k</sub> | shapes<sub>k</sub>)</div>
-            <p data-i18n="m3.d">In multi-feature mode the greedy shape and interaction search is repeated on each training fold, so the reported score is not flattered by the search. Fold-to-fold effect-curve correlation tells whether a shape is real.</p>
+            <p>In multi-feature mode the greedy shape and interaction search is repeated on each training fold, so the reported score is not flattered by the search. Fold-to-fold effect-curve correlation tells whether a shape is real.</p>
           </article>
-          <article class="card">
+          <article class="card span-2">
             <div class="card-kicker mono">guardrails</div>
-            <h3 data-i18n="m4.t">What it warns about</h3>
-            <ul class="checks" data-i18n="m4.d">
+            <h3>What it warns about</h3>
+            <ul class="checks two-col">
               <li>random-walk paths — curve withheld, returns analysed instead</li>
               <li>peak shapes fitted to monotone data</li>
               <li>tied models that disagree once extrapolated</li>
@@ -158,9 +191,9 @@
     <section id="library" class="section">
       <div class="container">
         <div class="section-head">
-          <div class="kicker mono">// 05 — library</div>
-          <h2 data-i18n="lib.title">32 candidate forms</h2>
-          <p data-i18n="lib.sub">Each form carries its bounds, domain rules and grid-based starting values. GLM versions with logit or log links are added automatically for binary, proportion and count targets.</p>
+          <div class="kicker mono">// 06 — library</div>
+          <h2>32 candidate forms</h2>
+          <p>Each form carries its bounds, domain rules and grid-based starting values. GLM versions with logit or log links are added automatically for binary, proportion and count targets.</p>
         </div>
         <div class="lib-tools">
           <div class="chips" id="libChips"></div>
@@ -173,9 +206,9 @@
     <section id="start" class="section">
       <div class="container">
         <div class="section-head">
-          <div class="kicker mono">// 06 — quick start</div>
-          <h2 data-i18n="start.title">Try it in a minute</h2>
-          <p data-i18n="start.sub">Dependencies are numpy, scipy, pandas and matplotlib — nothing else.</p>
+          <div class="kicker mono">// 07 — quick start</div>
+          <h2>Try it in a minute</h2>
+          <p>Dependencies are numpy, scipy, pandas and matplotlib. The C kernel compiles during installation when a compiler is available; otherwise fincurve falls back to NumPy automatically.</p>
         </div>
         <div class="start-grid">
           <div class="code-card">
@@ -197,11 +230,12 @@ report.ranking          <span class="c"># ΔCV-NLL, SE, ties, AIC for every form
           <div class="code-card span">
             <div class="code-head mono">reproduce this page <button class="copy" type="button" data-target="code-repro">copy</button></div>
 <pre id="code-repro">git clone https://github.com/yz12993-ux/fincurve && cd fincurve
-python tests/run_tests.py          <span class="c"># 16 regression tests with known ground truth</span>
-python site/build_site_data.py     <span class="c"># regenerates every number on this page</span></pre>
+python setup.py build_ext --inplace   <span class="c"># compile the C kernel (optional)</span>
+python tests/run_tests.py             <span class="c"># 21 tests with known ground truth</span>
+python benchmarks/bench.py            <span class="c"># timings shown in the performance section</span>
+python site/build_site_data.py        <span class="c"># regenerates every number on this page</span></pre>
           </div>
         </div>
-        <p class="note" data-i18n="start.note">Plain-language reports are currently written in Chinese; the structured results (report.ranking, report.recommended, report.warnings) can be used from any language.</p>
       </div>
     </section>
   </main>
@@ -209,7 +243,7 @@ python site/build_site_data.py     <span class="c"># regenerates every number on
   <footer class="footer">
     <div class="container foot">
       <span class="mono">fincurve · MIT © 2026 Yuang Zhang</span>
-      <span class="mono muted"><span data-i18n="foot.gen">data generated</span> <span id="generated"></span></span>
+      <span class="mono muted">data generated <span id="generated"></span></span>
       <a class="mono" href="https://github.com/yz12993-ux/fincurve" target="_blank" rel="noopener">github.com/yz12993-ux/fincurve ↗</a>
     </div>
   </footer>

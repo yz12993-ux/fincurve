@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fincurve"
-version = "0.1.0"
-description = "Find which functional form or distribution best characterises financial data, ranked by held-out likelihood."
+version = "0.2.0"
+description = "Find which functional form or distribution best characterises financial data, ranked by held-out likelihood, with compiled kernels."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Yuang Zhang" }]

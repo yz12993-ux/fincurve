@@ -9,18 +9,18 @@ from scipy import stats
 from .profile import acf1, ljung_box
 
 DISTRIBUTIONS = [
-    ("normal", "正态", stats.norm, "real", "基准；金融收益率的尾部通常比它厚"),
-    ("student_t", "Student-t", stats.t, "real", "对称厚尾：日收益率最常用"),
-    ("laplace", "Laplace", stats.laplace, "real", "尖峰、指数型尾部"),
-    ("logistic", "Logistic", stats.logistic, "real", "比正态略厚的对称尾部"),
-    ("skew_normal", "偏正态", stats.skewnorm, "real", "有偏但尾部不厚"),
-    ("johnson_su", "Johnson SU", stats.johnsonsu, "real", "偏度、峰度都能调"),
-    ("nig", "正态逆高斯 NIG", stats.norminvgauss, "real", "厚尾且有偏：Lévy 收益率模型"),
-    ("lognormal", "对数正态", stats.lognorm, "positive", "价格、规模、乘性过程"),
-    ("gamma", "Gamma", stats.gamma, "positive", "损失金额、等待时间"),
-    ("weibull", "Weibull", stats.weibull_min, "positive", "违约时间、寿命"),
-    ("inv_gauss", "逆高斯", stats.invgauss, "positive", "首次触及时间"),
-    ("exponential", "指数", stats.expon, "positive", "无记忆的等待时间"),
+    ("normal", "Normal", stats.norm, "real", "baseline; financial returns usually have heavier tails"),
+    ("student_t", "Student-t", stats.t, "real", "symmetric heavy tails: the usual choice for daily returns"),
+    ("laplace", "Laplace", stats.laplace, "real", "sharp peak with exponential tails"),
+    ("logistic", "Logistic", stats.logistic, "real", "symmetric tails slightly heavier than normal"),
+    ("skew_normal", "Skew-normal", stats.skewnorm, "real", "skewed but not heavy-tailed"),
+    ("johnson_su", "Johnson SU", stats.johnsonsu, "real", "flexible skewness and kurtosis"),
+    ("nig", "Normal-inverse Gaussian", stats.norminvgauss, "real", "heavy tails and skew: Lévy return model"),
+    ("lognormal", "Log-normal", stats.lognorm, "positive", "prices, sizes, multiplicative processes"),
+    ("gamma", "Gamma", stats.gamma, "positive", "loss amounts, waiting times"),
+    ("weibull", "Weibull", stats.weibull_min, "positive", "default times, lifetimes"),
+    ("inv_gauss", "Inverse Gaussian", stats.invgauss, "positive", "first-passage times"),
+    ("exponential", "Exponential", stats.expon, "positive", "memoryless waiting times"),
 ]
 TAIL_QUANTILES = (0.01, 0.05, 0.95, 0.99)
 
@@ -87,7 +87,7 @@ def run_distribution(y, include=None, exclude=None):
                 ks = stats.kstest(y, fd.cdf).statistic
                 mod_q = fd.ppf(np.array(TAIL_QUANTILES))
         except Exception:
-            row["status"] = "拟合失败"
+            row["status"] = "fit failed"
             continue
         nll = -float(np.sum(ll))
         row.update(k=k, nll=nll, aic=2 * k + 2 * nll, bic=k * np.log(n) + 2 * nll, ks=float(ks))

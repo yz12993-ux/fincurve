@@ -1,32 +1,33 @@
-══ fincurve 刻画报告：曲线模式（冲击成本 (bp) 对 参与率）══
-【数据画像】
-· 样本 90 个
-· y：正的连续值，范围 [3.336, 64.65]
-· 形状：单调上升，越来越平（饱和/边际递减）；局部平滑能解释 85% 的变化
-· 噪声：随水平放大（Spearman ρ = 0.55）
-【自动选择】
-· 误差模型：加性误差（正态） + 乘性误差（对数正态）——y 为正且噪声随水平放大（ρ = 0.55），同时比较加性误差和乘性误差
-· 验证方式：随机 K 折，5 次切分——数据没有时间顺序
-· 候选：比较了 64 个函数
-【排名】（ΔCV-NLL = 与最优模型相比、每个观测的留出负对数似然之差；★ 推荐；= 与最优的差距在 2 个标准误以内）
-= 1. Weibull 违约曲线            k= 4  ΔCV-NLL=       0 ±0       CV-RMSE=    7.04  ΔAIC=    0.0
-= 2. 截断幂律                    k= 4  ΔCV-NLL=6.32e-05 ±0.0047  CV-RMSE=    7.05  ΔAIC=    0.4
-★ 3. 平方根                     k= 3  ΔCV-NLL=  0.0019 ±0.019   CV-RMSE=     7.4  ΔAIC=    1.3
-= 4. Heston 波动率期限结构          k= 4  ΔCV-NLL= 0.00324 ±0.026   CV-RMSE=    6.95  ΔAIC=    4.0
-= 5. SVI 微笑                  k= 6  ΔCV-NLL= 0.00439 ±0.017   CV-RMSE=    7.37  ΔAIC=    6.5
-= 6. 幂律                      k= 3  ΔCV-NLL=  0.0108 ±0.023   CV-RMSE=    7.38  ΔAIC=    2.2
-= 7. 幂律+偏移                   k= 4  ΔCV-NLL=  0.0131 ±0.016   CV-RMSE=    7.07  ΔAIC=    0.3
-  8. 平移对数                    k= 4  ΔCV-NLL=  0.0216 ±0.01    CV-RMSE=    7.07  ΔAIC=    0.3
-  9. Hill 饱和                 k= 5  ΔCV-NLL=  0.0268 ±0.012   CV-RMSE=    7.07  ΔAIC=    1.9
-=10. 有理函数                    k= 4  ΔCV-NLL=   0.032 ±0.018   CV-RMSE=    7.25  ΔAIC=    2.4
-【推荐】
-· 平方根［乘性误差（对数正态）］：a + b·√x
-· 含义：扩散、√t 标度、冲击成本
-· 参数：a = -0.7016，b = 138.4
-· 理由：与最优模型差距在 2 个标准误以内的 16 个模型里参数最少；样本内 R² = 0.827
-【需要注意】
-· 并列模型分属不同类型（信用/违约、幂律、边际递减、期限结构、波动率、峰形）：数据本身区分不了这些含义不同的形状，要结合经济含义选择，或补充 x 范围更宽的数据
-【备注】
-· 与最优模型没有实质差距的共有 16 个：Weibull 违约曲线［乘性］、截断幂律［乘性］、平方根［乘性］、Heston 波动率期限结构［乘性］、SVI 微笑［乘性］、幂律［乘性］、幂律+偏移［乘性］、有理函数［乘性］
+== fincurve report: curve mode (impact (bp) vs participation rate) ==
+[Data profile]
+  - 90 observations
+  - y: positive continuous value, range [3.336, 64.65]
+  - shape: increasing, flattening (saturation / diminishing returns); a local smoother explains 85% of the variation
+  - noise: grows with the level (Spearman ρ = 0.55)
+[Automatic choices]
+  - error model: additive errors (Gaussian) + multiplicative errors (log-normal) — y is positive and noise grows with the level (Spearman ρ = 0.55): additive and multiplicative errors compete
+  - validation: shuffled K-fold, 5 splits — no time ordering
+  - candidates: 64 fitted
+[Ranking]  ΔCV-NLL = held-out negative log-likelihood per row relative to the best model;
+           * recommended, = practically tied with the best (within 2 paired SE and 0.1 nats)
+= 1. Weibull default curve                       k= 4  ΔCV-NLL=        0 ±0        CV-RMSE=    7.04  ΔAIC=    0.0
+= 2. Tempered power law                          k= 4  ΔCV-NLL= 6.27e-05 ±0.0047   CV-RMSE=    7.05  ΔAIC=    0.4
+* 3. Square root                                 k= 3  ΔCV-NLL=   0.0019 ±0.019    CV-RMSE=     7.4  ΔAIC=    1.3
+= 4. Heston vol term structure                   k= 4  ΔCV-NLL=  0.00324 ±0.026    CV-RMSE=    6.95  ΔAIC=    4.0
+= 5. SVI smile                                   k= 6  ΔCV-NLL=  0.00439 ±0.017    CV-RMSE=    7.37  ΔAIC=    6.5
+= 6. Power law                                   k= 3  ΔCV-NLL=   0.0108 ±0.023    CV-RMSE=    7.38  ΔAIC=    2.2
+= 7. Power law + offset                          k= 4  ΔCV-NLL=   0.0131 ±0.016    CV-RMSE=    7.07  ΔAIC=    0.3
+= 8. Hill saturation                             k= 5  ΔCV-NLL=   0.0154 ±0.013    CV-RMSE=    7.04  ΔAIC=    1.9
+  9. Shifted log                                 k= 4  ΔCV-NLL=   0.0216 ±0.01     CV-RMSE=    7.07  ΔAIC=    0.3
+=10. Lorentzian peak                             k= 5  ΔCV-NLL=   0.0229 ±0.021    CV-RMSE=    7.16  ΔAIC=    5.4
+[Recommendation]
+  - Square root [multiplicative errors (log-normal)]: a + b·√x
+  - meaning: diffusion, √t scaling, market impact
+  - parameters: a = -0.7016, b = 138.4
+  - why: fewest parameters among the 18 models practically tied with the best; in-sample R² = 0.827
+[Warnings]
+  - the tied models belong to different families (credit, power law, diminishing returns, term structure, volatility, saturation): the data cannot tell these shapes apart — choose on economic grounds or collect a wider x range
+[Notes]
+  - 18 models are practically tied with the best: Weibull default curve [multiplicative], Tempered power law [multiplicative], Square root [multiplicative], Heston vol term structure [multiplicative], SVI smile [multiplicative], Power law [multiplicative], Power law + offset [multiplicative], Hill saturation [multiplicative]
 
-（耗时 5.5 秒）
+(elapsed 1.3s)

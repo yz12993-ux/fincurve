@@ -1,33 +1,34 @@
-══ fincurve 刻画报告：曲线模式（平值隐含波动率 (%) 对 到期（年））══
-【数据画像】
-· 样本 10 个
-· y：正的连续值，范围 [20.8, 31.69]
-· 形状：单调下降；局部平滑能解释 100% 的变化
-· 噪声：大致恒定
-【自动选择】
-· 误差模型：加性误差（正态）——y 为正但跨度不大、噪声大致恒定，用加性误差
-· 验证方式：留一法，10 次切分——样本只有 10 个，用留一法
-· 候选：比较了 27 个函数，跳过 5 个（定义域或样本量不满足）
-【排名】（ΔCV-NLL = 与最优模型相比、每个观测的留出负对数似然之差；★ 推荐；= 与最优的差距在 2 个标准误以内）
-★ 1. 平移对数                    k= 4  ΔCV-NLL=       0 ±0       CV-RMSE=    0.22  ΔAIC=    0.0
-  2. 有理函数                    k= 4  ΔCV-NLL=   0.888 ±1.6     CV-RMSE=     0.2  ΔAIC=    0.1
-  3. Heston 波动率期限结构          k= 4  ΔCV-NLL=    1.08 ±1.4     CV-RMSE=   0.279  ΔAIC=    5.3
-  4. 指数趋近                    k= 4  ΔCV-NLL=    1.11 ±1.1     CV-RMSE=   0.335  ΔAIC=    8.1
-  5. Gompertz                k= 5  ΔCV-NLL=    1.11 ±0.97    CV-RMSE=   0.367  ΔAIC=   11.6
-  6. Nelson–Siegel           k= 5  ΔCV-NLL=    1.12 ±1.4     CV-RMSE=   0.269  ΔAIC=    6.8
-  7. 洛伦兹峰                    k= 5  ΔCV-NLL=    1.12 ±1.5     CV-RMSE=   0.268  ΔAIC=    6.8
-  8. 逻辑斯蒂                    k= 5  ΔCV-NLL=    1.13 ±0.91    CV-RMSE=   0.388  ΔAIC=   12.6
-  9. Hill 饱和                 k= 5  ΔCV-NLL=    1.14 ±1.5     CV-RMSE=   0.219  ΔAIC=    0.9
- 10. 平方根                     k= 3  ΔCV-NLL=    1.24 ±0.96    CV-RMSE=   0.505  ΔAIC=   16.3
-【推荐】
-· 平移对数［加性误差（正态）］：a + b·ln(x + c)
-· 含义：允许 x 含 0 的边际递减
-· 参数：a = 24.36，b = -4.72，c = 0.186
-· 理由：交叉验证分数最优；样本内 R² = 0.999
-【需要注意】
-· 样本只有 10 个：排名很不稳定，只作参考
-【备注】
-· x 的名字提示这是期限结构：该语境的专用形式“Heston 波动率期限结构”排第 3（比最优差 1.08 ± 1.4）。专用形式的参数有明确经济含义，差距不大时可以优先使用
-· 因定义域或样本量跳过的候选：double_exp、sine_trend、softplus、svensson、svi_smile
+== fincurve report: curve mode (ATM implied vol (%) vs maturity (years)) ==
+[Data profile]
+  - 10 observations
+  - y: positive continuous value, range [20.8, 31.69]
+  - shape: decreasing; a local smoother explains 100% of the variation
+  - noise: roughly constant
+[Automatic choices]
+  - error model: additive errors (Gaussian) — y is positive with a narrow range and constant noise: additive errors
+  - validation: leave-one-out, 10 splits — only 10 observations: leave-one-out
+  - candidates: 27 fitted, 5 skipped (domain or sample size)
+[Ranking]  ΔCV-NLL = held-out negative log-likelihood per row relative to the best model;
+           * recommended, = practically tied with the best (within 2 paired SE and 0.1 nats)
+* 1. Shifted log                                 k= 4  ΔCV-NLL=        0 ±0        CV-RMSE=    0.22  ΔAIC=    0.0
+  2. Rational                                    k= 4  ΔCV-NLL=    0.888 ±1.6      CV-RMSE=     0.2  ΔAIC=    0.1
+  3. Heston vol term structure                   k= 4  ΔCV-NLL=     1.08 ±1.4      CV-RMSE=   0.279  ΔAIC=    5.3
+  4. Exponential approach                        k= 4  ΔCV-NLL=     1.11 ±1.1      CV-RMSE=   0.335  ΔAIC=    8.1
+  5. Gompertz                                    k= 5  ΔCV-NLL=     1.11 ±0.97     CV-RMSE=   0.367  ΔAIC=   11.6
+  6. Nelson–Siegel                               k= 5  ΔCV-NLL=     1.12 ±1.4      CV-RMSE=   0.269  ΔAIC=    6.8
+  7. Lorentzian peak                             k= 5  ΔCV-NLL=     1.12 ±1.5      CV-RMSE=   0.268  ΔAIC=    6.8
+  8. Logistic                                    k= 5  ΔCV-NLL=     1.13 ±0.91     CV-RMSE=   0.388  ΔAIC=   12.6
+  9. Hill saturation                             k= 5  ΔCV-NLL=     1.14 ±1.5      CV-RMSE=   0.219  ΔAIC=    0.9
+ 10. Square root                                 k= 3  ΔCV-NLL=     1.24 ±0.96     CV-RMSE=   0.505  ΔAIC=   16.3
+[Recommendation]
+  - Shifted log [additive errors (Gaussian)]: a + b·ln(x + c)
+  - meaning: diminishing returns when x can be zero
+  - parameters: a = 24.36, b = -4.72, c = 0.186
+  - why: best cross-validated score; in-sample R² = 0.999
+[Warnings]
+  - only 10 observations: the ranking is unstable, treat it as indicative
+[Notes]
+  - the name of x suggests a term structure: the specialised form 'Heston vol term structure' ranks #3 (1.08 ± 1.4 behind the best). Its parameters have a direct economic meaning, so prefer it when the gap is small
+  - candidates skipped because of their domain or the sample size: double_exp, sine_trend, softplus, svensson, svi_smile
 
-（耗时 0.5 秒）
+(elapsed 0.3s)

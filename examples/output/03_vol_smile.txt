@@ -1,31 +1,32 @@
-══ fincurve 刻画报告：曲线模式（隐含波动率 (%) 对 对数行权价 ln(K/F)）══
-【数据画像】
-· 样本 25 个
-· y：正的连续值，范围 [18.86, 42.78]
-· 形状：先降后升（有谷）；局部平滑能解释 100% 的变化
-· 噪声：大致恒定；x 等间距
-【自动选择】
-· 误差模型：加性误差（正态）——y 为正但跨度不大、噪声大致恒定，用加性误差
-· 验证方式：随机 K 折，5 次切分——数据没有时间顺序
-· 候选：比较了 18 个函数，跳过 14 个（定义域或样本量不满足）
-【排名】（ΔCV-NLL = 与最优模型相比、每个观测的留出负对数似然之差；★ 推荐；= 与最优的差距在 2 个标准误以内）
-★ 1. SVI 微笑                  k= 6  ΔCV-NLL=       0 ±0       CV-RMSE=   0.232  ΔAIC=    0.0
-  2. 周期+趋势                   k= 6  ΔCV-NLL=    0.13 ±0.49    CV-RMSE=   0.422  ΔAIC=   38.4
-  3. 平滑曲棍球杆                  k= 6  ΔCV-NLL=   0.352 ±0.27    CV-RMSE=   0.421  ΔAIC=   29.9
-  4. 高斯峰                     k= 5  ΔCV-NLL=   0.628 ±0.54    CV-RMSE=   0.689  ΔAIC=   60.9
-  5. 单拐点折线                   k= 5  ΔCV-NLL=   0.656 ±0.47    CV-RMSE=   0.521  ΔAIC=   42.0
-  6. 洛伦兹峰                    k= 5  ΔCV-NLL=   0.658 ±0.53    CV-RMSE=   0.715  ΔAIC=   62.8
-  7. 三次                      k= 5  ΔCV-NLL=    1.04 ±0.6     CV-RMSE=   0.993  ΔAIC=   76.0
-  8. 二次                      k= 4  ΔCV-NLL=    1.26 ±0.51    CV-RMSE=    1.41  ΔAIC=   96.5
-  9. 逻辑斯蒂                    k= 5  ΔCV-NLL=     1.3 ±0.51    CV-RMSE=    1.52  ΔAIC=  102.7
- 10. 非参数平滑（参照）               k= -  ΔCV-NLL=      参照 ±1.1     CV-RMSE=   0.309
-【推荐】
-· SVI 微笑［加性误差（正态）］：√(a + b·(ρ(x − m) + √((x − m)² + σ²)))
-· 含义：隐含波动率微笑/偏斜（x 为对数行权价）
-· 参数：a = 103.9，b = 3318，ρ = -0.5638，m = 0.02399，σ = 0.09248
-· 理由：交叉验证分数最优；样本内 R² = 1
-【备注】
-· x 的名字提示这是波动率微笑，推荐模型正好是该语境的专用形式
-· 因定义域或样本量跳过的候选：black_scholes、hazard_cdf、heston_vol_term、hill、hyperbolic、log、michaelis_menten、nelson_siegel、power、power_offset、sqrt、svensson、tempered_power、weibull_cdf
+== fincurve report: curve mode (implied vol (%) vs log-moneyness ln(K/F)) ==
+[Data profile]
+  - 25 observations
+  - y: positive continuous value, range [18.86, 42.78]
+  - shape: falls then rises (valley); a local smoother explains 100% of the variation
+  - noise: roughly constant; x is equally spaced
+[Automatic choices]
+  - error model: additive errors (Gaussian) — y is positive with a narrow range and constant noise: additive errors
+  - validation: shuffled K-fold, 5 splits — no time ordering
+  - candidates: 18 fitted, 14 skipped (domain or sample size)
+[Ranking]  ΔCV-NLL = held-out negative log-likelihood per row relative to the best model;
+           * recommended, = practically tied with the best (within 2 paired SE and 0.1 nats)
+* 1. SVI smile                                   k= 6  ΔCV-NLL=        0 ±0        CV-RMSE=   0.232  ΔAIC=    0.0
+  2. Sine + trend                                k= 6  ΔCV-NLL=     0.13 ±0.49     CV-RMSE=   0.422  ΔAIC=   38.4
+  3. Soft hockey stick                           k= 6  ΔCV-NLL=    0.351 ±0.27     CV-RMSE=   0.421  ΔAIC=   29.9
+  4. Gaussian peak                               k= 5  ΔCV-NLL=    0.628 ±0.54     CV-RMSE=   0.689  ΔAIC=   60.9
+  5. Hinge                                       k= 5  ΔCV-NLL=    0.656 ±0.47     CV-RMSE=   0.521  ΔAIC=   42.0
+  6. Cubic                                       k= 5  ΔCV-NLL=     1.04 ±0.6      CV-RMSE=   0.993  ΔAIC=   76.0
+  7. Quadratic                                   k= 4  ΔCV-NLL=     1.26 ±0.51     CV-RMSE=    1.41  ΔAIC=   96.5
+  8. Logistic                                    k= 5  ΔCV-NLL=      1.3 ±0.51     CV-RMSE=    1.52  ΔAIC=  102.7
+  9. Local-linear smoother (reference)           k= -  ΔCV-NLL=reference ±1.1      CV-RMSE=   0.309
+ 10. Gompertz                                    k= 5  ΔCV-NLL=     1.41 ±0.49     CV-RMSE=    1.71  ΔAIC=  108.1
+[Recommendation]
+  - SVI smile [additive errors (Gaussian)]: √(a + b·(ρ(x − m) + √((x − m)² + σ²)))
+  - meaning: implied-volatility smile / skew (x is log-moneyness)
+  - parameters: a = 103.9, b = 3318, ρ = -0.5638, m = 0.02399, σ = 0.09248
+  - why: best cross-validated score; in-sample R² = 1
+[Notes]
+  - the name of x suggests a volatility smile, and the recommended model is that context's specialised form
+  - candidates skipped because of their domain or the sample size: black_scholes, hazard_cdf, heston_vol_term, hill, hyperbolic, log, michaelis_menten, nelson_siegel, power, power_offset, sqrt, svensson, tempered_power, weibull_cdf
 
-（耗时 1.0 秒）
+(elapsed 0.2s)

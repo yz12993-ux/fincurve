@@ -8,37 +8,39 @@ import re
 import numpy as np
 from scipy import stats
 
-TIME_NAME = re.compile(r"(date|time|year|month|week|day|period|日期|时间|年份|月份)", re.I)
-TERM_NAME = re.compile(r"(tenor|maturity|term|expiry|ttm|horizon|期限|到期(?!收益)|久期)", re.I)
+from .kernels import local_linear
+
+TIME_NAME = re.compile(r"\b(date|datetime|time|timestamp|year|month|week|day|period)s?\b", re.I)
+TERM_NAME = re.compile(r"^(?!.*\b(yield|ytm)\b).*\b(tenor|maturity|term|expiry|ttm|horizon)", re.I)
 CONTEXTS = [
     # (regex on the x name, label, library groups that carry the matching finance meaning)
-    (TERM_NAME, "期限结构", ("term_structure", "credit")),
-    (re.compile(r"(strike|moneyness|delta|行权|虚实|K/F)", re.I), "波动率微笑", ("volatility",)),
-    (re.compile(r"(yield|ytm|rate|收益率|利率)", re.I), "价格–收益率关系", ("fixed_income",)),
-    (re.compile(r"(score|rating|fico|评分|评级)", re.I), "信用评分", ("sigmoid", "credit")),
-    (re.compile(r"(spot|underlying|标的|现价)", re.I), "期权–标的价格", ("options",)),
+    (TERM_NAME, "term structure", ("term_structure", "credit")),
+    (re.compile(r"(strike|moneyness|delta|K/F)", re.I), "volatility smile", ("volatility",)),
+    (re.compile(r"\b(yield|ytm|interest rate|discount rate|coupon rate|swap rate)\b", re.I), "price–yield relationship", ("fixed_income",)),
+    (re.compile(r"(score|rating|fico)", re.I), "credit-score relationship", ("sigmoid", "credit")),
+    (re.compile(r"(spot|underlying)", re.I), "option–underlying relationship", ("options",)),
 ]
 
 TARGET_KINDS = {
-    "binary": "0/1 二元结果",
-    "proportion": "比例/概率（0–1）",
-    "count": "非负整数计数",
-    "positive": "正的连续值",
-    "real": "可正可负的连续值",
+    "binary": "binary 0/1 outcome",
+    "proportion": "proportion / probability (0–1)",
+    "count": "non-negative integer count",
+    "positive": "positive continuous value",
+    "real": "continuous value of either sign",
 }
 SHAPES = {
-    "flat": "基本水平",
-    "increasing": "单调上升",
-    "decreasing": "单调下降",
-    "peak": "先升后降（有峰）",
-    "valley": "先降后升（有谷）",
-    "wavy": "多次起伏",
+    "flat": "flat",
+    "increasing": "increasing",
+    "decreasing": "decreasing",
+    "peak": "rises then falls (peak)",
+    "valley": "falls then rises (valley)",
+    "wavy": "oscillating",
 }
 PATTERNS = {
-    "flattening": "越来越平（饱和/边际递减）",
-    "steepening": "越来越陡（加速）",
-    "steady": "斜率大致不变",
-    "s_shaped": "两端平、中间陡（S 形）",
+    "flattening": "flattening (saturation / diminishing returns)",
+    "steepening": "steepening (accelerating)",
+    "steady": "roughly constant slope",
+    "s_shaped": "flat ends and a steep middle (S-shape)",
 }
 
 
@@ -48,42 +50,11 @@ def acf1(r):
     return float(np.sum(r[1:] * r[:-1]) / den) if den > 0 else 0.0
 
 
-def local_linear(x, y, x_eval=None, frac=0.3, loo=False):
-    """Tricube-weighted local linear regression (LOWESS without robustness iterations).
-
-    With loo=True (only when evaluating at x itself) each point is predicted without its own weight.
-    """
-    x, y = np.asarray(x, float), np.asarray(y, float)
-    loo = loo and x_eval is None
-    x_eval = x if x_eval is None else np.asarray(x_eval, float)
-    n = x.size
-    m = int(min(n, max(np.ceil(frac * n), 5)))
-    span = np.ptp(x) or 1.0
-    out = np.empty(x_eval.size)
-    for i, x0 in enumerate(x_eval):
-        d = np.abs(x - x0)
-        h = np.partition(d, m - 1)[m - 1]
-        if h <= 0:
-            h = d.max() if d.max() > 0 else 1.0
-        k = np.clip(1 - (d / (h * 1.0001)) ** 3, 0, None) ** 3
-        if loo:
-            k[i] = 0.0
-        sw = k.sum()
-        if sw <= 0:
-            out[i] = np.nan
-            continue
-        xm, ym = k @ x / sw, k @ y / sw
-        sxx = k @ (x - xm) ** 2
-        b = (k @ ((x - xm) * (y - ym))) / sxx if sxx > 1e-12 * sw * span * span else 0.0
-        out[i] = ym + b * (x0 - xm)
-    return out
-
-
 def choose_frac(x, y, fracs=(0.1, 0.2, 0.3, 0.5, 0.8)):
     """Bandwidth with the smallest leave-one-out error (subsampled for large n)."""
     x, y = np.asarray(x, float), np.asarray(y, float)
-    if x.size > 1500:
-        idx = np.random.default_rng(0).choice(x.size, 1500, replace=False)
+    if x.size > 6000:
+        idx = np.random.default_rng(0).choice(x.size, 6000, replace=False)
         x, y = x[idx], y[idx]
     scores = {}
     for f in fracs:
@@ -96,9 +67,9 @@ def choose_frac(x, y, fracs=(0.1, 0.2, 0.3, 0.5, 0.8)):
 def smooth_curve(x, y, frac=0.3):
     """Local-linear smooth evaluated at x; subsamples and interpolates for large n."""
     x, y = np.asarray(x, float), np.asarray(y, float)
-    if x.size <= 1500:
+    if x.size <= 20000:
         return local_linear(x, y, frac=frac)
-    idx = np.random.default_rng(0).choice(x.size, min(x.size, 3000), replace=False)
+    idx = np.random.default_rng(0).choice(x.size, 20000, replace=False)
     grid = np.unique(np.quantile(x, np.linspace(0, 1, 200)))
     return np.interp(x, grid, local_linear(x[idx], y[idx], grid, frac))
 

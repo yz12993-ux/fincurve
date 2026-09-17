@@ -1,27 +1,31 @@
 """Multi-feature mode: link(E[y]) = β₀ + Σ f_j(x_j) + interactions, one shape per feature.
 
-Every numeric feature starts linear. A greedy search swaps in a nonlinear shape
-(log, saturating, sigmoid, peak, kink, ...) only when it lowers AIC by a clear
-margin, then products of the most important features are tested. Categorical
-features enter as one-hot offsets. Shape selection is repeated inside every
-cross-validation fold so the reported score is not flattered by the search.
+Once the few nonlinear shape parameters (sigmoid slope and centre, hinge location, ...)
+are fixed, every model here is linear in its coefficients. Fits therefore use variable
+projection: coefficients are solved exactly — least squares for Gaussian and log-normal
+targets, IRLS for binary and count targets — and the optimiser only moves the nonlinear
+parameters. Shapes are chosen greedily by AIC, and the search is repeated inside every
+cross-validation fold so the reported score is not flattered by it.
 """
 import itertools
 from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import least_squares
+from scipy.spatial import cKDTree
 from scipy.special import expit
 
 from .families import get_family
-from .fitting import fit_params
+from .fitting import _inside, inner_fit, wls
+from .parallel import pmap, resolve_jobs
 from .scoring import rank_table
 
-GAUSSIAN = get_family("gaussian")
 SHAPE_LABELS = {
-    "linear": "线性", "quadratic": "二次（U 形/倒 U 形）", "cubic": "三次", "log": "对数（边际递减）",
-    "sqrt": "平方根", "reciprocal": "反比", "power": "幂律", "exp": "指数（加速或衰减）",
-    "sigmoid": "S 形（阈值切换）", "peak": "单峰", "hinge": "折线（有拐点）",
+    "linear": "linear", "quadratic": "quadratic (U / inverted U)", "cubic": "cubic",
+    "log": "logarithmic (diminishing)", "sqrt": "square root", "reciprocal": "reciprocal", "power": "power law",
+    "exp": "exponential (accelerating or decaying)", "sigmoid": "sigmoid (threshold)", "peak": "single peak",
+    "hinge": "hinge (kink)",
 }
 INF = np.inf
 
@@ -59,20 +63,21 @@ def _categorical(name, s, n):
     vals = s.astype(str).to_numpy()
     levels, counts = np.unique(vals, return_counts=True)
     if levels.size <= 1:
-        return Feature(name, "excluded", "只有一个取值")
+        return Feature(name, "excluded", "only one distinct value")
     if levels.size > max(20, 0.05 * n):
         return Feature(name, "excluded",
-                       f"{levels.size} 个类别：高基数字段（像 ID），one-hot 会让模型记住样本、造成泄漏")
+                       f"{levels.size} categories: a high-cardinality field (looks like an ID); one-hot "
+                       "encoding would let the model memorise rows and leak")
     rare = counts < max(5, 0.01 * n)
     merged = set(levels[rare].tolist()) if rare.sum() >= 2 else set()
     if merged:
-        vals = np.where(np.isin(vals, list(merged)), "其他", vals)
+        vals = np.where(np.isin(vals, list(merged)), "other", vals)
         levels, counts = np.unique(vals, return_counts=True)
     if levels.size <= 1:
-        return Feature(name, "excluded", "合并稀有类别后只剩一个取值")
+        return Feature(name, "excluded", "only one distinct value after merging rare levels")
     order = np.argsort(-counts, kind="stable")
     ordered = [str(levels[i]) for i in order]
-    note = f"基准类别：{ordered[0]}" + (f"；{len(merged)} 个稀有类别并入“其他”" if merged else "")
+    note = f"reference level: {ordered[0]}" + (f"; {len(merged)} rare levels merged into 'other'" if merged else "")
     onehot = np.column_stack([(vals == lv).astype(float) for lv in ordered[1:]])
     return Feature(name, "categorical", note, onehot=onehot, levels=ordered, stats={"merged": merged})
 
@@ -92,12 +97,13 @@ def prepare_features(df):
             v = s.to_numpy(float)
             uniq = np.unique(v)
             if uniq.size <= 1:
-                feats.append(Feature(name, "excluded", "只有一个取值"))
+                feats.append(Feature(name, "excluded", "only one distinct value"))
             elif uniq.size == 2:
                 feats.append(Feature(name, "binary", raw=(v == uniq[1]).astype(float),
                                      levels=[uniq[0].item(), uniq[1].item()]))
             elif np.allclose(v, np.round(v)) and uniq.size == n and np.ptp(v) == n - 1:
-                feats.append(Feature(name, "excluded", "连续整数且每行唯一：像行号或 ID，放进模型会造成泄漏"))
+                feats.append(Feature(name, "excluded",
+                                     "consecutive unique integers: looks like a row number or ID and would leak"))
             else:
                 feats.append(_numeric(name, v, discrete=uniq.size <= 6))
     return feats
@@ -121,83 +127,69 @@ def encode(template, df):
             out.append(replace(f, raw=(s.to_numpy() == f.levels[1]).astype(float)))
         else:
             vals = s.astype(str).to_numpy()
-            vals = np.where(np.isin(vals, list(f.stats["merged"])), "其他", vals)
+            vals = np.where(np.isin(vals, list(f.stats["merged"])), "other", vals)
             out.append(replace(f, onehot=np.column_stack([(vals == lv).astype(float) for lv in f.levels[1:]])))
     return out
 
 
 # ----------------------------------------------------------------------------- shape components
-@dataclass
+@dataclass(frozen=True)
 class Component:
+    """A shape: n_lin coefficient columns that depend on n_nl nonlinear parameters."""
     shape: str
-    n: int
-    f: object
-    bounds: tuple
-    init: object
+    n_lin: int
+    nl_lb: tuple
+    nl_ub: tuple
+    grid: tuple
+    columns: object          # (z, x, nl) -> list of arrays
 
+    @property
+    def n_nl(self):
+        return len(self.nl_lb)
 
-def _grid_init(cols_fn, grid, assemble):
-    """Weighted least squares for the linear coefficients at each nonlinear setting."""
-    def init(z, x, target, wt):
-        sw = np.sqrt(wt)
-        found = []
-        for g in grid:
-            with np.errstate(all="ignore"):
-                A = np.column_stack([np.ones_like(z)] + cols_fn(z, x, g))
-                if not np.all(np.isfinite(A)):
-                    continue
-                coef, *_ = np.linalg.lstsq(A * sw[:, None], target * sw, rcond=None)
-                rss = float(np.sum(wt * (A @ coef - target) ** 2))
-            found.append((rss, [float(coef[0])] + [float(v) for v in assemble(coef[1:], g)]))
-        found.sort(key=lambda t: t[0])
-        return [p for _, p in found[:3]]
-    return init
+    @property
+    def n_params(self):
+        return self.n_lin + self.n_nl
 
 
 def make_component(shape, st):
     zq, xref = st["zq"], st["xref"]
     zmin, zr = st["zmin"], (st["zmax"] - st["zmin"]) or 1.0
     mids = (zq[2], zq[3], zq[4])
+
+    def span(lo, hi):
+        return (lo, hi if hi > lo else lo + 1e-6)
+
     if shape == "linear":
-        return Component(shape, 1, lambda z, x, b: b * z, None,
-                         _grid_init(lambda z, x, g: [z], [0], lambda c, g: [c[0]]))
+        return Component(shape, 1, (), (), ((),), lambda z, x, nl: [z])
     if shape == "quadratic":
-        return Component(shape, 2, lambda z, x, b, c: b * z + c * z * z, None,
-                         _grid_init(lambda z, x, g: [z, z * z], [0], lambda c, g: list(c)))
+        return Component(shape, 2, (), (), ((),), lambda z, x, nl: [z, z * z])
     if shape == "cubic":
-        return Component(shape, 3, lambda z, x, b, c, d: b * z + c * z * z + d * z ** 3, None,
-                         _grid_init(lambda z, x, g: [z, z * z, z ** 3], [0], lambda c, g: list(c)))
+        return Component(shape, 3, (), (), ((),), lambda z, x, nl: [z, z * z, z ** 3])
     if shape == "log":
-        return Component(shape, 1, lambda z, x, b: b * np.log(x / xref), None,
-                         _grid_init(lambda z, x, g: [np.log(x / xref)], [0], lambda c, g: [c[0]]))
+        return Component(shape, 1, (), (), ((),), lambda z, x, nl: [np.log(x / xref)])
     if shape == "sqrt":
-        return Component(shape, 1, lambda z, x, b: b * np.sqrt(np.maximum(x, 0) / xref), None,
-                         _grid_init(lambda z, x, g: [np.sqrt(np.maximum(x, 0) / xref)], [0], lambda c, g: [c[0]]))
+        return Component(shape, 1, (), (), ((),), lambda z, x, nl: [np.sqrt(np.maximum(x, 0) / xref)])
     if shape == "reciprocal":
-        return Component(shape, 1, lambda z, x, b: b * xref / x, None,
-                         _grid_init(lambda z, x, g: [xref / x], [0], lambda c, g: [c[0]]))
+        return Component(shape, 1, (), (), ((),), lambda z, x, nl: [xref / x])
     if shape == "power":
-        return Component(shape, 2, lambda z, x, b, c: b * np.power(x / xref, c), ([-INF, -3], [INF, 3]),
-                         _grid_init(lambda z, x, c: [np.power(x / xref, c)], [0.5, 2.0, -1.0],
-                                    lambda k, c: [k[0], c]))
+        return Component(shape, 1, (-3.0,), (3.0,), ((0.5,), (2.0,), (-1.0,)),
+                         lambda z, x, nl: [np.power(x / xref, nl[0])])
     if shape == "exp":
-        return Component(shape, 2, lambda z, x, a, k: a * np.exp(k * (z - zmin) / zr), ([-INF, -15], [INF, 15]),
-                         _grid_init(lambda z, x, k: [np.exp(k * (z - zmin) / zr)], [-6.0, -2.0, 2.0, 6.0],
-                                    lambda c, k: [c[0], k]))
+        return Component(shape, 1, (-15.0,), (15.0,), ((-6.0,), (-2.0,), (2.0,), (6.0,)),
+                         lambda z, x, nl: [np.exp(nl[0] * (z - zmin) / zr)])
     if shape == "sigmoid":
-        return Component(shape, 3, lambda z, x, K, r, m: K * expit(r * (z - m)),
-                         ([-INF, 0.2, zq[0]], [INF, 50, zq[6]]),
-                         _grid_init(lambda z, x, t: [expit(t[1] * (z - t[0]))],
-                                    [(m, r) for m in mids for r in (1.0, 4.0)], lambda c, t: [c[0], t[1], t[0]]))
+        lo, hi = span(zq[0], zq[6])
+        return Component(shape, 1, (0.2, lo), (50.0, hi), tuple((r, m) for m in mids for r in (1.0, 4.0)),
+                         lambda z, x, nl: [expit(nl[0] * (z - nl[1]))])
     if shape == "peak":
-        return Component(shape, 3, lambda z, x, a, m, w: a * np.exp(-((z - m) ** 2) / (2 * w * w)),
-                         ([-INF, zq[0], 0.1], [INF, zq[6], 5]),
-                         _grid_init(lambda z, x, t: [np.exp(-((z - t[0]) ** 2) / (2 * t[1] ** 2))],
-                                    [(m, w) for m in mids for w in (0.5, 1.5)], lambda c, t: [c[0], t[0], t[1]]))
+        lo, hi = span(zq[0], zq[6])
+        return Component(shape, 1, (lo, 0.1), (hi, 5.0), tuple((m, w) for m in mids for w in (0.5, 1.5)),
+                         lambda z, x, nl: [np.exp(-((z - nl[0]) ** 2) / (2 * nl[1] ** 2))])
     if shape == "hinge":
-        return Component(shape, 3, lambda z, x, b, c, k: b * z + c * np.maximum(0, z - k),
-                         ([-INF, -INF, zq[1]], [INF, INF, zq[5]]),
-                         _grid_init(lambda z, x, k: [z, np.maximum(0, z - k)], mids, lambda c, k: [c[0], c[1], k]))
+        lo, hi = span(zq[1], zq[5])
+        return Component(shape, 2, (lo,), (hi,), tuple((m,) for m in mids),
+                         lambda z, x, nl: [z, np.maximum(0, z - nl[0])])
     raise ValueError(shape)
 
 
@@ -215,88 +207,178 @@ def allowed_shapes(f):
 
 
 # ----------------------------------------------------------------------------- model design
+@dataclass
+class Block:
+    name: str
+    kind: str                # numeric | binary | categorical | interaction
+    component: object
+    lin: slice
+    nl: slice
+    cols: object             # (idx, nl) -> list of arrays
+
+
 class Design:
-    """Parameter layout and evaluation of one additive specification."""
+    """Column layout of one additive specification: eta = M(nl) @ beta, column 0 is the intercept."""
 
     def __init__(self, feats, shapes, interactions, family):
         self.feats, self.family = feats, family
         self.shapes, self.interactions = dict(shapes), list(interactions)
         self.blocks = []
-        lb, ub, k = [-INF], [INF], 1
-        zs = {}
+        p, q, lb, ub, zs = 1, 0, [], [], {}
         for f in feats:
             if f.kind == "numeric":
                 comp = make_component(self.shapes[f.name], f.stats)
-                ev = (lambda c, z, x: lambda idx, p: c.f(z[idx], x[idx], *p))(comp, f.z, f.raw)
-                n_p, b = comp.n, comp.bounds or ([-INF] * comp.n, [INF] * comp.n)
+                cols = (lambda c, z, x: lambda idx, nl: c.columns(z[idx], x[idx], nl))(comp, f.z, f.raw)
+                self.blocks.append(Block(f.name, "numeric", comp, slice(p, p + comp.n_lin), slice(q, q + comp.n_nl), cols))
+                p, q = p + comp.n_lin, q + comp.n_nl
+                lb += list(comp.nl_lb)
+                ub += list(comp.nl_ub)
                 zs[f.name] = f.z
             elif f.kind == "binary":
-                ev, n_p, b = (lambda v: lambda idx, p: p[0] * v[idx])(f.raw), 1, ([-INF], [INF])
+                cols = (lambda v: lambda idx, nl: [v[idx]])(f.raw)
+                self.blocks.append(Block(f.name, "binary", None, slice(p, p + 1), slice(q, q), cols))
+                p += 1
             elif f.kind == "categorical":
-                n_p = f.onehot.shape[1]
-                ev, b = (lambda M: lambda idx, p: M[idx] @ p)(f.onehot), ([-INF] * n_p, [INF] * n_p)
-            else:
-                continue
-            self.blocks.append((f.name, f.kind, slice(k, k + n_p), ev))
-            lb += list(b[0])
-            ub += list(b[1])
-            k += n_p
-        for a, c in self.interactions:
-            ev = (lambda za, zc: lambda idx, p: p[0] * za[idx] * zc[idx])(zs[a], zs[c])
-            self.blocks.append((f"{a} × {c}", "interaction", slice(k, k + 1), ev))
-            lb.append(-INF)
-            ub.append(INF)
-            k += 1
-        self.k = k
-        self.bounds = (np.array(lb), np.array(ub))
+                width = f.onehot.shape[1]
+                cols = (lambda M: lambda idx, nl: list(M[idx].T))(f.onehot)
+                self.blocks.append(Block(f.name, "categorical", None, slice(p, p + width), slice(q, q), cols))
+                p += width
+        for a, b in self.interactions:
+            cols = (lambda za, zb: lambda idx, nl: [za[idx] * zb[idx]])(zs[a], zs[b])
+            self.blocks.append(Block(f"{a} × {b}", "interaction", None, slice(p, p + 1), slice(q, q), cols))
+            p += 1
+        self.p, self.q = p, q
+        self.nl_lb, self.nl_ub = np.array(lb, float), np.array(ub, float)
 
-    def eta(self, idx, theta):
-        theta = np.asarray(theta, float)
-        out = np.full(len(idx), theta[0])
-        for _, _, sl, ev in self.blocks:
-            out = out + ev(idx, theta[sl])
-        return out
+    @property
+    def k(self):
+        return self.p + self.q
 
-    def mean_fn(self, idx, *theta):
-        with np.errstate(all="ignore"):
-            return self.family.inverse_link(self.eta(idx, theta))
+    def matrix(self, idx, nl):
+        cols = [np.ones(len(idx))]
+        for b in self.blocks:
+            cols.extend(b.cols(idx, nl[b.nl]))
+        return np.column_stack(cols)
 
-    def contribution(self, name, idx, theta):
-        for bname, _, sl, ev in self.blocks:
-            if bname == name:
-                with np.errstate(all="ignore"):
-                    return ev(idx, np.asarray(theta, float)[sl])
-        return np.zeros(len(idx))
+    def block(self, name):
+        return next((b for b in self.blocks if b.name == name), None)
 
     def with_features(self, feats):
         return Design(feats, self.shapes, self.interactions, self.family)
 
+    def start_nl(self, previous=None, override=None):
+        """Nonlinear start: overrides first, then values from a previous fit with the same shape, else grid."""
+        override = override or {}
+        out = np.empty(self.q)
+        for b in self.blocks:
+            if b.kind != "numeric" or b.component.n_nl == 0:
+                continue
+            if b.name in override:
+                out[b.nl] = override[b.name]
+                continue
+            old = previous.design.block(b.name) if previous is not None else None
+            if old is not None and old.kind == "numeric" and old.component.shape == b.component.shape:
+                out[b.nl] = previous.nl[old.nl]
+            else:
+                out[b.nl] = b.component.grid[0]
+        return out
 
-def _transfer(src, theta, dst, override=None, shift=0.0):
-    override = override or {}
-    out = np.zeros(dst.k)
-    out[0] = theta[0] + shift
-    src_blocks = {name: sl for name, _, sl, _ in src.blocks}
-    for name, _, sl, _ in dst.blocks:
-        if name in override:
-            out[sl] = override[name]
-        elif name in src_blocks and src.shapes.get(name) == dst.shapes.get(name):
-            out[sl] = np.asarray(theta)[src_blocks[name]]
-    return out
+
+@dataclass
+class Fit:
+    design: Design
+    nl: np.ndarray
+    beta: np.ndarray
 
 
-def _evaluate(design, theta, idx, y, w):
+def _eta_limits(family):
+    return (-35.0, 35.0) if family.name == "binomial" else (-700.0, 700.0)
+
+
+def _mean(family, eta):
+    lo, hi = _eta_limits(family)
+    return eta if family.name == "gaussian" else family.inverse_link(np.clip(eta, lo, hi))
+
+
+def _solve(design, idx, y, w, nl, beta0=None):
     fam = design.family
-    mu = fam.clip(design.mean_fn(idx, *theta))
+    with np.errstate(all="ignore"):
+        M = design.matrix(idx, nl)
+        if not np.all(np.isfinite(M)):
+            return None, None
+        if fam.name == "gaussian":
+            beta = wls(M, y[idx], w[idx])
+        elif fam.name == "lognormal":
+            beta = wls(M, np.log(y[idx]), w[idx])
+        else:
+            beta, _ = inner_fit(M, y[idx], w[idx], fam, link=True, beta0=beta0)
+    if not np.all(np.isfinite(beta)):
+        return None, None
+    return beta, M
+
+
+def fit_design(design, idx, y, w, starts=None, max_nfev=None):
+    """Variable-projection fit of a design on rows idx. Returns a Fit or None."""
+    fam = design.family
+    if design.q == 0:
+        beta, _ = _solve(design, idx, y, w, np.empty(0))
+        return None if beta is None else Fit(design, np.empty(0), beta)
+    state = {"beta": None}
+    yy, ww = y[idx], w[idx]
+
+    def resid(nl):
+        beta, M = _solve(design, idx, y, w, nl, state["beta"])
+        if beta is None:
+            return np.full(len(idx), 1e4)
+        state["beta"] = beta
+        with np.errstate(all="ignore"):
+            r = fam.fit_residuals(yy, _mean(fam, M @ beta), ww)
+        return np.where(np.isfinite(r), r, 1e8)
+
+    iterative = fam.name in ("binomial", "poisson")
+    best = None
+    for s in starts or [design.start_nl()]:
+        state["beta"] = None
+        try:
+            sol = least_squares(resid, _inside(s, design.nl_lb, design.nl_ub), bounds=(design.nl_lb, design.nl_ub),
+                                x_scale="jac", max_nfev=max_nfev or 40 * (design.q + 1), ftol=1e-8, xtol=1e-8,
+                                diff_step=1e-6 if iterative else None)
+        except Exception:
+            continue
+        if best is None or sol.cost < best.cost:
+            best = sol
+    if best is None:
+        return None
+    beta, _ = _solve(design, idx, y, w, best.x)
+    return None if beta is None else Fit(design, best.x, beta)
+
+
+def fit_mean(fit, idx):
+    return _mean(fit.design.family, fit.design.matrix(idx, fit.nl) @ fit.beta)
+
+
+def aic_of(fit, idx, y, w):
+    fam = fit.design.family
+    with np.errstate(all="ignore"):
+        mu = fam.clip(fit_mean(fit, idx))
     if not np.all(np.isfinite(mu)):
-        return np.inf, np.inf, None
+        return INF
     scale = fam.scale(y[idx], mu, w[idx])
     nll = float(np.sum(fam.nll(y[idx], mu, scale, w[idx])))
-    return nll, 2 * (design.k + fam.extra_params) + 2 * nll, scale
+    return 2 * (fit.design.k + fam.extra_params) + 2 * nll
+
+
+def contribution(fit, name, idx):
+    b = fit.design.block(name)
+    if b is None:
+        return np.zeros(len(idx))
+    with np.errstate(all="ignore"):
+        return np.column_stack(b.cols(idx, fit.nl[b.nl])) @ fit.beta[b.lin]
 
 
 def _working(fam, y, eta, w):
-    mu = fam.clip(fam.inverse_link(eta))
+    """Link-scale working response and weights for screening one feature's shape."""
+    mu = fam.clip(_mean(fam, eta))
     if fam.name == "lognormal":
         return np.log(y), w
     if fam.name == "binomial":
@@ -307,90 +389,98 @@ def _working(fam, y, eta, w):
     return y, w
 
 
+def fit_component(comp, z, x, target, wt):
+    """Screen one shape against a partial residual: intercept + shape columns, weighted least squares."""
+    sw = np.sqrt(wt)
+
+    def resid(nl):
+        with np.errstate(all="ignore"):
+            M = np.column_stack([np.ones_like(z)] + comp.columns(z, x, nl))
+            if not np.all(np.isfinite(M)):
+                return np.full(z.shape, 1e4)
+            beta = wls(M, target, wt)
+            return (target - M @ beta) * sw
+
+    if comp.n_nl == 0:
+        r = resid(())
+        return float(r @ r), ()
+    scored = sorted(((float(r @ r), g) for g in comp.grid for r in [resid(g)]), key=lambda t: t[0])
+    lb, ub = np.array(comp.nl_lb), np.array(comp.nl_ub)
+    try:
+        sol = least_squares(resid, _inside(scored[0][1], lb, ub), bounds=(lb, ub), x_scale="jac",
+                            max_nfev=30 * (comp.n_nl + 1))
+    except Exception:
+        return scored[0][0], scored[0][1]
+    return 2 * sol.cost, tuple(sol.x)
+
+
 def fit_linear(feats, family, idx, y, w):
     design = Design(feats, {f.name: "linear" for f in feats if f.kind == "numeric"}, [], family)
-    cols = [np.ones(len(idx))]
-    for f in feats:
-        if f.kind == "numeric":
-            cols.append(f.z[idx])
-        elif f.kind == "binary":
-            cols.append(f.raw[idx])
-        elif f.kind == "categorical":
-            cols += list(f.onehot[idx].T)
-    A = np.column_stack(cols)
-    sw = np.sqrt(w[idx])
-    start, *_ = np.linalg.lstsq(A * sw[:, None], family.working_response(y[idx]) * sw, rcond=None)
-    theta, _ = fit_params(design.mean_fn, idx, y[idx], w[idx], family, [start], design.bounds)
-    if theta is None:
-        raise RuntimeError("线性基准模型拟合失败")
-    return design, theta, _evaluate(design, theta, idx, y, w)[1]
+    fit = fit_design(design, idx, y, w)
+    if fit is None:
+        raise RuntimeError("the all-linear baseline model failed to fit")
+    return fit, aic_of(fit, idx, y, w)
 
 
 def search_shapes(feats, family, idx, y, w, sweeps=2, margin=4.0):
-    design, theta, aic = fit_linear(feats, family, idx, y, w)
+    fit, aic = fit_linear(feats, family, idx, y, w)
     numeric = [f for f in feats if f.kind == "numeric"]
     history = []
     for _ in range(sweeps):
         changed = False
-        for f in sorted(numeric, key=lambda f: -np.var(design.contribution(f.name, idx, theta))):
-            eta = design.eta(idx, theta)
+        for f in sorted(numeric, key=lambda f: -np.var(contribution(fit, f.name, idx))):
+            with np.errstate(all="ignore"):
+                eta = fit.design.matrix(idx, fit.nl) @ fit.beta
             target, wt = _working(family, y[idx], eta, w[idx])
-            current = design.contribution(f.name, idx, theta)
-            partial = target - (eta - current)
+            partial = target - (eta - contribution(fit, f.name, idx))
+            current = fit.design.shapes[f.name]
             screened = []
             for shape in allowed_shapes(f):
-                comp = make_component(shape, f.stats)
-                starts = comp.init(f.z[idx], f.raw[idx], partial, wt)
-                lb, ub = comp.bounds or ([-INF] * comp.n, [INF] * comp.n)
-                func = (lambda c, z, x: lambda i, c0, *p: c0 + c.f(z[i], x[i], *p))(comp, f.z, f.raw)
-                p, cost = fit_params(func, idx, partial, wt, GAUSSIAN, starts, ([-INF] + list(lb), [INF] + list(ub)))
-                if p is not None:
-                    screened.append((cost, shape, p))
-            now = next((c for c, s, _ in screened if s == design.shapes[f.name]), INF)
-            options = sorted((o for o in screened if o[1] != design.shapes[f.name] and o[0] < 0.995 * now),
-                             key=lambda o: o[0])[:3]
+                sse, nl = fit_component(make_component(shape, f.stats), f.z[idx], f.raw[idx], partial, wt)
+                if np.isfinite(sse):
+                    screened.append((sse, shape, nl))
+            now = next((s for s, sh, _ in screened if sh == current), INF)
+            options = sorted((o for o in screened if o[1] != current and o[0] < 0.995 * now), key=lambda o: o[0])[:3]
             best = None
-            for _, shape, p in options:
-                trial = Design(feats, dict(design.shapes, **{f.name: shape}), design.interactions, family)
-                start = _transfer(design, theta, trial, {f.name: p[1:]}, shift=p[0])
-                t2, _ = fit_params(trial.mean_fn, idx, y[idx], w[idx], family, [start], trial.bounds)
-                if t2 is None:
+            for _, shape, nl in options:
+                trial = Design(feats, dict(fit.design.shapes, **{f.name: shape}), fit.design.interactions, family)
+                tfit = fit_design(trial, idx, y, w, [trial.start_nl(fit, {f.name: nl})])
+                if tfit is None:
                     continue
-                aic2 = _evaluate(trial, t2, idx, y, w)[1]
-                if aic2 < aic - margin and (best is None or aic2 < best[0]):
-                    best = (aic2, shape, trial, t2)
+                taic = aic_of(tfit, idx, y, w)
+                if taic < aic - margin and (best is None or taic < best[0]):
+                    best = (taic, shape, tfit)
             if best:
-                history.append({"feature": f.name, "from": design.shapes[f.name], "to": best[1],
-                                "aic_gain": aic - best[0]})
-                aic, _, design, theta = best
+                history.append({"feature": f.name, "from": current, "to": best[1], "aic_gain": aic - best[0]})
+                aic, _, fit = best
                 changed = True
         if not changed:
             break
-    return design, theta, aic, history
+    return fit, aic, history
 
 
-def search_interactions(design, theta, aic, idx, y, w, top=4, max_terms=2, margin=10.0):
+def search_interactions(fit, aic, idx, y, w, top=4, max_terms=2, margin=10.0):
+    design = fit.design
     numeric = [f for f in design.feats if f.kind == "numeric"]
-    ranked = sorted(numeric, key=lambda f: -np.var(design.contribution(f.name, idx, theta)))[:top]
+    ranked = sorted(numeric, key=lambda f: -np.var(contribution(fit, f.name, idx)))[:top]
     added = []
     for _ in range(max_terms):
         best = None
         for a, b in itertools.combinations([f.name for f in ranked], 2):
-            if (a, b) in design.interactions:
+            if (a, b) in fit.design.interactions:
                 continue
-            trial = Design(design.feats, design.shapes, design.interactions + [(a, b)], design.family)
-            t2, _ = fit_params(trial.mean_fn, idx, y[idx], w[idx], design.family,
-                               [_transfer(design, theta, trial)], trial.bounds)
-            if t2 is None:
+            trial = Design(design.feats, fit.design.shapes, fit.design.interactions + [(a, b)], design.family)
+            tfit = fit_design(trial, idx, y, w, [trial.start_nl(fit)])
+            if tfit is None:
                 continue
-            aic2 = _evaluate(trial, t2, idx, y, w)[1]
-            if aic2 < aic - margin and (best is None or aic2 < best[0]):
-                best = (aic2, (a, b), trial, t2)
+            taic = aic_of(tfit, idx, y, w)
+            if taic < aic - margin and (best is None or taic < best[0]):
+                best = (taic, (a, b), tfit)
         if not best:
             break
         added.append({"pair": best[1], "aic_gain": aic - best[0]})
-        aic, _, design, theta = best
-    return design, theta, aic, added
+        aic, _, fit = best
+    return fit, aic, added
 
 
 # ----------------------------------------------------------------------------- reference
@@ -406,60 +496,51 @@ def _knn_matrix(feats):
     return np.hstack(cols) if cols else None
 
 
-def _knn_predict(M, g, tr, te, k, exclude_self=False):
-    out = np.empty(len(te))
-    for start in range(0, len(te), 500):
-        chunk = te[start:start + 500]
-        d = ((M[chunk][:, None, :] - M[tr][None, :, :]) ** 2).sum(-1)
-        kk = min(k + exclude_self, len(tr))
-        nn = np.argpartition(d, kk - 1, axis=1)[:, :kk]
-        if exclude_self:
-            order = np.argsort(np.take_along_axis(d, nn, axis=1), axis=1)
-            nn = np.take_along_axis(nn, order, axis=1)[:, 1:]
-        out[start:start + len(chunk)] = g[tr][nn].mean(axis=1)
-    return out
-
-
 def knn_reference(feats, family, y, w, splits):
+    """k-nearest-neighbour predictions (KD-tree) as a non-parametric benchmark."""
     M = _knn_matrix(feats)
     if M is None:
         return None
-    link = np.log if family.name == "lognormal" else (lambda v: v)
-    inv = np.exp if family.name == "lognormal" else (lambda v: v)
-    g = link(y)
+    g = np.log(y) if family.name == "lognormal" else y
+    back = np.exp if family.name == "lognormal" else (lambda v: v)
     test_nll = np.full(y.size, np.nan)
     for tr, te in splits:
         k = int(np.clip(np.sqrt(len(tr)), 5, 50))
-        mu_tr = family.clip(inv(_knn_predict(M, g, tr, tr, k, exclude_self=True)))
-        mu_te = family.clip(inv(_knn_predict(M, g, tr, te, k)))
+        tree = cKDTree(M[tr])
+        _, nn_tr = tree.query(M[tr], k=k + 1, workers=-1)
+        _, nn_te = tree.query(M[te], k=k, workers=-1)
+        g_tr = g[tr]
+        mu_tr = family.clip(back(g_tr[nn_tr[:, 1:]].mean(axis=1)))
+        mu_te = family.clip(back(g_tr[np.atleast_2d(nn_te)].mean(axis=1)))
         scale = family.scale(y[tr], mu_tr, w[tr])
         test_nll[te] = family.nll(y[te], mu_te, scale, w[te])
     return test_nll
 
 
-def effect_curve(design, theta, f):
+# ----------------------------------------------------------------------------- driver
+def effect_curve(fit, f):
     """Centred contribution of numeric feature f over its 1st–99th percentile grid."""
-    sl = next(sl for name, _, sl, _ in design.blocks if name == f.name)
-    comp = make_component(design.shapes[f.name], f.stats)
+    b = fit.design.block(f.name)
     grid = f.stats["grid"]
+    nl, beta = fit.nl[b.nl], fit.beta[b.lin]
     with np.errstate(all="ignore"):
-        curve = comp.f((grid - f.stats["med"]) / f.stats["scale"], grid, *np.asarray(theta)[sl])
-        centre = np.mean(comp.f(f.z, f.raw, *np.asarray(theta)[sl]))
+        curve = np.column_stack(b.component.columns((grid - f.stats["med"]) / f.stats["scale"], grid, nl)) @ beta
+        centre = np.mean(np.column_stack(b.component.columns(f.z, f.raw, nl)) @ beta)
     return grid, curve - centre
 
 
 def describe_effect(grid, eff):
     span = np.ptp(eff)
     if not np.isfinite(span) or span < 1e-12:
-        return "几乎无影响"
+        return "negligible"
     d = np.diff(eff)
     sig = np.sign(np.where(np.abs(d) < 0.002 * span, 0, d))
     nz = sig[sig != 0]
     turns = int(np.sum(nz[1:] != nz[:-1])) if nz.size > 1 else 0
     if turns >= 2:
-        return "多次起伏"
+        return "oscillating"
     if turns == 1:
-        return "先升后降" if nz[0] > 0 else "先降后升"
+        return "rise then fall" if nz[0] > 0 else "fall then rise"
     t = (grid - grid.min()) / (np.ptp(grid) or 1.0)     # real x spacing, not percentile rank
     curv = np.polyfit(t, eff / span, 2)[0]
     rising = nz.size and nz[0] > 0
@@ -469,107 +550,135 @@ def describe_effect(grid, eff):
         steepest = t[np.argmax(slope)]
         ends = max(slope[t <= t[0] + 0.1].mean(), slope[t >= t[-1] - 0.1].mean())
         if 0.1 < steepest < 0.9 and ends < 0.25 * slope.max():
-            return "S 形上升（中间陡、两端平）" if rising else "S 形下降（中间陡、两端平）"
+            return "S-shaped rise" if rising else "S-shaped fall"
     if abs(curv) < 0.15:
-        return "近似线性上升" if rising else "近似线性下降"
+        return "roughly linear rise" if rising else "roughly linear fall"
     if rising:
-        return "加速上升" if curv > 0 else "上升趋缓"
-    return "下降趋缓" if curv > 0 else "加速下降"
+        return "accelerating rise" if curv > 0 else "rising, flattening"
+    return "falling, flattening" if curv > 0 else "accelerating fall"
 
 
-# ----------------------------------------------------------------------------- driver
 @dataclass
 class AdditiveModel:
     id: str
     label: str
-    design: Design
-    theta: np.ndarray
+    fit: Fit
     scale: object
     template: list
 
+    @property
+    def design(self):
+        return self.fit.design
+
     def predict(self, df):
         feats = encode(self.template, df)
-        d = self.design.with_features(feats)
-        idx = np.arange(len(df))
-        return self.design.family.mean(self.design.family.clip(d.mean_fn(idx, *self.theta)), self.scale)
+        design = self.fit.design.with_features(feats)
+        fam = design.family
+        with np.errstate(all="ignore"):
+            eta = design.matrix(np.arange(len(df)), self.fit.nl) @ self.fit.beta
+        return fam.mean(fam.clip(_mean(fam, eta)), self.scale)
 
     def partial_effects(self):
         """Centred contribution of each term on the link scale, for plotting."""
         effects = {}
-        comps = {name: sl for name, _, sl, _ in self.design.blocks}
-        for f in self.design.feats:
-            if f.name not in comps:
+        by_name = {f.name: f for f in self.fit.design.feats}
+        for b in self.fit.design.blocks:
+            f = by_name.get(b.name)
+            if f is None:
                 continue
-            p = self.theta[comps[f.name]]
-            if f.kind == "numeric":
-                comp = make_component(self.design.shapes[f.name], f.stats)
-                grid = f.stats["grid"]
-                with np.errstate(all="ignore"):
-                    curve = comp.f((grid - f.stats["med"]) / f.stats["scale"], grid, *p)
-                    centre = np.mean(comp.f(f.z, f.raw, *p))
-                effects[f.name] = ("numeric", grid, curve - centre, f.raw)
-            elif f.kind == "binary":
-                effects[f.name] = ("levels", [str(v) for v in f.levels], np.array([0.0, p[0]]), None)
+            beta = self.fit.beta[b.lin]
+            if b.kind == "numeric":
+                grid, eff = effect_curve(self.fit, f)
+                effects[f.name] = ("numeric", grid, eff, f.raw)
+            elif b.kind == "binary":
+                effects[f.name] = ("levels", [str(v) for v in f.levels], np.array([0.0, beta[0]]), None)
             else:
-                effects[f.name] = ("levels", f.levels, np.concatenate([[0.0], p]), None)
+                effects[f.name] = ("levels", f.levels, np.concatenate([[0.0], beta]), None)
         return effects
 
 
-def run_additive(feats, family, y, w, splits, nested=True, interactions=True):
+def _fold_scores(fit, family, tr, te, y, w):
+    with np.errstate(all="ignore"):
+        mu_tr = family.clip(fit_mean(fit, tr))
+        mu_te = family.clip(fit_mean(fit, te))
+    scale = family.scale(y[tr], mu_tr, w[tr])
+    return family.nll(y[te], mu_te, scale, w[te]), family.mean(mu_te, scale)
+
+
+def _nested_fold(usable, family, y, w, tr, te, variant_ids, full_curves):
+    """Repeat the whole shape (and interaction) search on one training fold and score its test rows."""
+    fits = {"linear": fit_linear(usable, family, tr, y, w)[0]}
+    agreement = {}
+    if "shapes" in variant_ids:
+        s_fit, s_aic, _ = search_shapes(usable, family, tr, y, w)
+        fits["shapes"] = s_fit
+        for f in usable:
+            if f.kind != "numeric":
+                continue
+            a, b = full_curves[f.name], effect_curve(s_fit, f)[1]
+            if np.ptp(a) < 1e-12 or np.ptp(b) < 1e-12:
+                agreement[f.name] = float(np.ptp(a) < 1e-12 and np.ptp(b) < 1e-12)
+            else:
+                agreement[f.name] = float(np.corrcoef(a, b)[0, 1])
+        if "interactions" in variant_ids:
+            fits["interactions"] = search_interactions(s_fit, s_aic, tr, y, w)[0]
+    scores = {vid: _fold_scores(fit, family, tr, te, y, w) for vid, fit in fits.items() if vid in variant_ids}
+    return scores, agreement
+
+
+def _nested_fold_remote(payload):
+    usable, family_name, y, w, tr, te, variant_ids, full_curves = payload
+    return _nested_fold(usable, get_family(family_name), y, w, tr, te, variant_ids, full_curves)
+
+
+def run_additive(feats, family, y, w, splits, nested=True, interactions=True, n_jobs=1):
     n = y.size
     idx = np.arange(n)
     usable = [f for f in feats if f.kind != "excluded"]
-    lin_design, lin_theta, lin_aic = fit_linear(usable, family, idx, y, w)
-    shp_design, shp_theta, shp_aic, history = search_shapes(usable, family, idx, y, w)
-    has_numeric = any(f.kind == "numeric" for f in usable)
-    variants = {"linear": ("全线性（GLM 基准）" if has_numeric else "类别/二元偏移模型", lin_design, lin_theta, lin_aic)}
-    if has_numeric:
-        variants["shapes"] = ("加性形状模型", shp_design, shp_theta, shp_aic)
-    added = []
-    if interactions and sum(f.kind == "numeric" for f in usable) >= 2:
-        int_design, int_theta, int_aic, added = search_interactions(shp_design, shp_theta, shp_aic, idx, y, w)
-        if added:
-            variants["interactions"] = ("加性形状 + 交互项", int_design, int_theta, int_aic)
+    numeric = [f for f in usable if f.kind == "numeric"]
 
-    rows = []
+    lin_fit, lin_aic = fit_linear(usable, family, idx, y, w)
+    variants = {"linear": ("All-linear GLM (baseline)" if numeric else "Category / binary offsets", lin_fit, lin_aic)}
+    shp_fit, shp_aic, history, added = lin_fit, lin_aic, [], []
+    if numeric:
+        shp_fit, shp_aic, history = search_shapes(usable, family, idx, y, w)
+        variants["shapes"] = ("Additive shape model", shp_fit, shp_aic)
+        if interactions and len(numeric) >= 2:
+            int_fit, int_aic, added = search_interactions(shp_fit, shp_aic, idx, y, w)
+            if added:
+                variants["interactions"] = ("Shapes + interactions", int_fit, int_aic)
+
     test_nll = {vid: np.full(n, np.nan) for vid in variants}
     test_pred = {vid: np.full(n, np.nan) for vid in variants}
-    numeric = [f for f in usable if f.kind == "numeric"]
-    full_curves = {f.name: effect_curve(shp_design, shp_theta, f)[1] for f in numeric}
+    full_curves = {f.name: effect_curve(shp_fit, f)[1] for f in numeric}
     fold_agreement = {f.name: [] for f in numeric}
-    for tr, te in splits:
-        if nested:
-            d_s, t_s, a_s, _ = search_shapes(usable, family, tr, y, w)
-            for f in numeric:
-                a, b = full_curves[f.name], effect_curve(d_s, t_s, f)[1]
-                if np.ptp(a) < 1e-12 or np.ptp(b) < 1e-12:
-                    fold_agreement[f.name].append(float(np.ptp(a) < 1e-12 and np.ptp(b) < 1e-12))
-                else:
-                    fold_agreement[f.name].append(float(np.corrcoef(a, b)[0, 1]))
-            fold_models = {"linear": fit_linear(usable, family, tr, y, w)[:2], "shapes": (d_s, t_s)}
-            if "interactions" in variants:
-                d_i, t_i, _, _ = search_interactions(d_s, t_s, a_s, tr, y, w)
-                fold_models["interactions"] = (d_i, t_i)
+    if nested:
+        variant_ids = tuple(variants)
+        workers = resolve_jobs(n_jobs, len(splits))
+        if workers > 1:
+            outcomes = pmap(_nested_fold_remote, [(usable, family.name, y, w, tr, te, variant_ids, full_curves)
+                                                  for tr, te in splits], workers)
         else:
-            fold_models = {}
-            for vid, (_, d, th, _) in variants.items():
-                t_fold, _ = fit_params(d.mean_fn, tr, y[tr], w[tr], family, [th], d.bounds)
-                fold_models[vid] = (d, th if t_fold is None else t_fold)
-        for vid, (d, th) in fold_models.items():
-            if vid not in variants:
-                continue
-            mu_tr = family.clip(d.mean_fn(tr, *th))
-            mu_te = family.clip(d.mean_fn(te, *th))
-            scale = family.scale(y[tr], mu_tr, w[tr])
-            test_nll[vid][te] = family.nll(y[te], mu_te, scale, w[te])
-            test_pred[vid][te] = family.mean(mu_te, scale)
+            outcomes = [_nested_fold(usable, family, y, w, tr, te, variant_ids, full_curves) for tr, te in splits]
+        for (tr, te), (scores, agreement) in zip(splits, outcomes):
+            for vid, (nll, pred) in scores.items():
+                test_nll[vid][te], test_pred[vid][te] = nll, pred
+            for name, value in agreement.items():
+                fold_agreement[name].append(value)
+    else:
+        for tr, te in splits:
+            for vid, (_, vfit, _) in variants.items():
+                refit = fit_design(vfit.design, tr, y, w, [vfit.nl] if vfit.design.q else None) or vfit
+                test_nll[vid][te], test_pred[vid][te] = _fold_scores(refit, family, tr, te, y, w)
 
-    models = {}
-    for vid, (label, d, th, aic) in variants.items():
-        scale = _evaluate(d, th, idx, y, w)[2]
-        models[vid] = AdditiveModel(vid, label, d, th, scale, feats)
-        pred = family.mean(family.clip(d.mean_fn(idx, *th)), scale)
-        rows.append({"id": vid, "model": vid, "label": label, "family": family.name, "k": d.k + family.extra_params,
+    models, rows = {}, []
+    for vid, (label, vfit, aic) in variants.items():
+        with np.errstate(all="ignore"):
+            mu = family.clip(fit_mean(vfit, idx))
+        scale = family.scale(y, mu, w)
+        models[vid] = AdditiveModel(vid, label, vfit, scale, feats)
+        pred = family.mean(mu, scale)
+        rows.append({"id": vid, "model": vid, "label": label, "family": family.name, "k": vfit.design.k + family.extra_params,
                      "aic": aic, "r2": float(1 - np.sum((y - pred) ** 2) / np.sum((y - y.mean()) ** 2)),
                      "cv_rmse": float(np.sqrt(np.nanmean((y - test_pred[vid]) ** 2))), "status": "ok"})
 
@@ -579,36 +688,35 @@ def run_additive(feats, family, y, w, splits, nested=True, interactions=True):
         if ref is not None:
             test_nll["knn"] = ref
             reference_ids.append("knn")
-            rows.append({"id": "knn", "model": "knn", "label": "K 近邻（非参数参照）", "family": family.name,
-                         "k": np.nan, "status": "reference"})
+            rows.append({"id": "knn", "model": "knn", "label": "k-nearest neighbours (reference)",
+                         "family": family.name, "k": np.nan, "status": "reference"})
 
     table, best, recommended = rank_table(rows, test_nll, w, reference_ids)
     table["d_aic"] = table["aic"] - table["aic"].min()
 
-    final = models[recommended]
-    effects_var = {name: float(np.var(final.design.contribution(name, idx, final.theta)))
-                   for name, *_ in final.design.blocks}
-    total = sum(effects_var.values()) or 1.0
+    final = models[recommended].fit
+    variance = {b.name: float(np.var(contribution(final, b.name, idx))) for b in final.design.blocks}
+    total = sum(variance.values()) or 1.0
     feature_rows = []
     for f in feats:
-        row = {"feature": f.name, "type": {"numeric": "数值", "binary": "二元", "categorical": "类别",
-                                            "excluded": "已剔除"}[f.kind], "note": f.note}
+        row = {"feature": f.name, "type": f.kind, "note": f.note}
         if f.kind != "excluded":
-            shape = final.design.shapes.get(f.name)
-            row["shape"] = SHAPE_LABELS.get(shape, "偏移项") if f.kind == "numeric" else "偏移项"
-            row["importance"] = effects_var.get(f.name, 0.0) / total
+            row["importance"] = variance.get(f.name, 0.0) / total
             if f.kind == "numeric":
-                row["trend"] = ("几乎无影响" if row["importance"] < 0.005
-                                else describe_effect(*effect_curve(final.design, final.theta, f)))
+                row["shape"] = SHAPE_LABELS[final.design.block(f.name).component.shape]
+                row["trend"] = ("negligible" if row["importance"] < 0.005
+                                else describe_effect(*effect_curve(final, f)))
                 if fold_agreement.get(f.name):
                     row["stability"] = float(np.mean(fold_agreement[f.name]))
+            else:
+                row["shape"] = "offset"
         feature_rows.append(row)
-    for name, kind, *_ in final.design.blocks:
-        if kind == "interaction":
-            feature_rows.append({"feature": name, "type": "交互项", "shape": "乘积",
-                                 "importance": effects_var[name] / total, "note": ""})
+    for b in final.design.blocks:
+        if b.kind == "interaction":
+            feature_rows.append({"feature": b.name, "type": "interaction", "shape": "product",
+                                 "importance": variance[b.name] / total, "note": ""})
 
     return {"table": table, "models": models, "best": best, "recommended": recommended,
             "features": pd.DataFrame(feature_rows), "history": history, "interactions": added,
             "test_nll": test_nll, "reference_ids": reference_ids, "nested": nested,
-            "full_shapes": dict(shp_design.shapes)}
+            "full_shapes": dict(shp_fit.design.shapes)}

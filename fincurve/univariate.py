@@ -5,9 +5,12 @@ from dataclasses import dataclass
 import numpy as np
 from scipy import stats
 
-from .fitting import fit_params, jitter
+from .families import get_family
+from .fitting import fit_params, fit_separable, jitter
+from .parallel import pmap, resolve_jobs
 from .library import GROUPS, Scale, build_library, domain_ok, link_versions
-from .profile import acf1, local_linear
+from .kernels import local_linear
+from .profile import acf1
 from .scoring import rank_table
 
 
@@ -18,6 +21,7 @@ class FittedCurve:
     family: object
     params: np.ndarray
     scale: object
+    theta: tuple = ()
 
     @property
     def label(self):
@@ -51,12 +55,27 @@ def _safe_init(c, x, y):
         return []
 
 
-def _cross_validate(c, fam, x, y, w, splits, p_full):
+def _fit(c, fam, x, y, w, n_starts, rng, theta=None):
+    """Fit a candidate; returns (params, theta). A theta warm start skips the grid search."""
+    if c.separable:
+        if theta is not None:
+            p, th, _ = fit_separable(c, x, y, w, fam, theta_starts=[theta] if c.q else None,
+                                     use_grid=False, n_refine=1)
+        else:
+            p, th, _ = fit_separable(c, x, y, w, fam)
+        return p, th
+    return None, None
+
+
+def _cross_validate(c, fam, x, y, w, splits, p_full, theta_full):
     n = x.size
     test_nll, test_pred = np.full(n, np.nan), np.full(n, np.nan)
     for tr, te in splits:
-        starts = [p_full] + ([] if len(splits) > 8 else _safe_init(c, x[tr], y[tr])[:1])
-        pt, _ = fit_params(c.func, x[tr], y[tr], w[tr], fam, starts, c.bounds)
+        if c.separable:
+            pt, _ = _fit(c, fam, x[tr], y[tr], w[tr], 0, None, theta=theta_full)
+        else:
+            starts = [p_full] + ([] if len(splits) > 8 else _safe_init(c, x[tr], y[tr])[:1])
+            pt, _ = fit_params(c.func, x[tr], y[tr], w[tr], fam, starts, c.bounds, max_nfev=40 * (c.k + 1))
         if pt is None:
             return test_nll, test_pred, False
         with np.errstate(all="ignore"):
@@ -71,12 +90,9 @@ def _cross_validate(c, fam, x, y, w, splits, p_full):
 
 
 def _smooth_predict(xt, yt, xe, frac):
-    if xt.size > 2000:
-        idx = np.random.default_rng(0).choice(xt.size, 2000, replace=False)
+    if xt.size > 20000:
+        idx = np.random.default_rng(0).choice(xt.size, 20000, replace=False)
         xt, yt = xt[idx], yt[idx]
-    if xe.size > 400:
-        grid = np.unique(np.quantile(xe, np.linspace(0, 1, 300)))
-        return np.interp(xe, grid, local_linear(xt, yt, grid, frac))
     return local_linear(xt, yt, xe, frac)
 
 
@@ -94,14 +110,49 @@ def _reference(fam, x, y, w, splits, frac):
     return test_nll, test_pred
 
 
-def run_race(x, y, w, families, splits, n_starts=2, include=None, exclude=None, seed=0, frac=0.3):
+def _evaluate(c, fam, x, y, w, splits, n_starts, seed):
+    """Fit one candidate on all rows and in every fold. Returns a picklable result."""
     rng = np.random.default_rng(seed)
+    n = x.size
+    theta = ()
+    if c.separable:
+        p, theta = _fit(c, fam, x, y, w, n_starts, rng)
+    else:
+        starts = _safe_init(c, x, y)
+        p, _ = fit_params(c.func, x, y, w, fam, jitter(starts, n_starts, rng), c.bounds) if starts else (None, 0)
+    if p is None:
+        return {"status": "fit failed"}
+    with np.errstate(all="ignore"):
+        mu = fam.clip(c.func(x, *p))
+    if not np.all(np.isfinite(mu)):
+        return {"status": "fit failed"}
+    scale = fam.scale(y, mu, w)
+    nll = float(np.sum(fam.nll(y, mu, scale, w)))
+    pred = fam.mean(mu, scale)
+    k = c.k + fam.extra_params
+    out = {"status": "ok", "params": np.asarray(p, float), "theta": theta, "scale": scale,
+           "aic": 2 * k + 2 * nll, "bic": k * np.log(n) + 2 * nll,
+           "r2": float(1 - np.sum((y - pred) ** 2) / np.sum((y - y.mean()) ** 2)) if np.ptp(y) > 0 else np.nan}
+    tn, tp, ok = _cross_validate(c, fam, x, y, w, splits, p, theta)
+    if ok:
+        out.update(test_nll=tn, cv_rmse=float(np.sqrt(np.nanmean((y - tp) ** 2))))
+    else:
+        out["status"] = "prediction failed in cross-validation (usually extrapolation outside the domain)"
+    return out
+
+
+def _evaluate_remote(payload):
+    key, family_name, x, y, w, splits, n_starts, seed = payload
+    sc, fam = Scale.from_x(x), get_family(family_name)
+    c = next(c for c in build_library(sc) + link_versions(sc, fam) if c.key == key)
+    return _evaluate(c, fam, x, y, w, splits, n_starts, seed)
+
+
+def run_race(x, y, w, families, splits, n_starts=2, include=None, exclude=None, seed=0, frac=0.3, n_jobs=1):
     sc = Scale.from_x(x)
     base = build_library(sc)
     multi = len(families) > 1
-    rows, test_nll, fitted, skipped = [], {}, {}, []
-    n = x.size
-
+    tasks, skipped = [], []
     for fam in families:
         for c in base + link_versions(sc, fam):
             if not _selected(c, include, exclude):
@@ -109,32 +160,28 @@ def run_race(x, y, w, families, splits, n_starts=2, include=None, exclude=None, 
             if not domain_ok(c, x, y):
                 skipped.append(c.key)
                 continue
-            mid = f"{c.key}@{fam.name}" if multi else c.key
-            row = {"id": mid, "model": c.key, "label": c.label, "family": fam.name, "group": GROUPS[c.group],
-                   "formula": c.formula, "k": c.k + fam.extra_params, "status": "ok"}
-            rows.append(row)
-            starts = _safe_init(c, x, y)
-            p, _ = fit_params(c.func, x, y, w, fam, jitter(starts, n_starts, rng), c.bounds) if starts else (None, 0)
-            if p is None:
-                row["status"] = "拟合失败"
-                continue
-            with np.errstate(all="ignore"):
-                mu = fam.clip(c.func(x, *p))
-            if not np.all(np.isfinite(mu)):
-                row["status"] = "拟合失败"
-                continue
-            scale = fam.scale(y, mu, w)
-            nll = float(np.sum(fam.nll(y, mu, scale, w)))
-            pred = fam.mean(mu, scale)
-            row.update(aic=2 * row["k"] + 2 * nll, bic=row["k"] * np.log(n) + 2 * nll,
-                       r2=float(1 - np.sum((y - pred) ** 2) / np.sum((y - y.mean()) ** 2)) if np.ptp(y) > 0 else np.nan)
-            fitted[mid] = FittedCurve(mid, c, fam, p, scale)
-            tn, tp, ok = _cross_validate(c, fam, x, y, w, splits, p)
-            if ok:
-                test_nll[mid] = tn
-                row["cv_rmse"] = float(np.sqrt(np.nanmean((y - tp) ** 2)))
-            else:
-                row["status"] = "交叉验证中预测失败（常见于外推出定义域）"
+            tasks.append((c, fam, f"{c.key}@{fam.name}" if multi else c.key))
+
+    seeds = [seed * 1_000_003 + i for i in range(len(tasks))]
+    workers = resolve_jobs(n_jobs, len(tasks))
+    if workers > 1:
+        results = pmap(_evaluate_remote, [(c.key, fam.name, x, y, w, splits, n_starts, s)
+                                          for (c, fam, _), s in zip(tasks, seeds)], workers)
+    else:
+        results = [_evaluate(c, fam, x, y, w, splits, n_starts, s) for (c, fam, _), s in zip(tasks, seeds)]
+
+    rows, test_nll, fitted = [], {}, {}
+    for (c, fam, mid), res in zip(tasks, results):
+        row = {"id": mid, "model": c.key, "label": c.label, "family": fam.name, "group": GROUPS[c.group],
+               "formula": c.formula, "k": c.k + fam.extra_params, "status": res["status"]}
+        rows.append(row)
+        if "params" not in res:
+            continue
+        row.update(aic=res["aic"], bic=res["bic"], r2=res["r2"])
+        fitted[mid] = FittedCurve(mid, c, fam, res["params"], res["scale"], res["theta"])
+        if "test_nll" in res:
+            test_nll[mid] = res["test_nll"]
+            row["cv_rmse"] = res["cv_rmse"]
 
     reference_ids = []
     for fam in families:
@@ -142,8 +189,8 @@ def run_race(x, y, w, families, splits, n_starts=2, include=None, exclude=None, 
         tn, tp = _reference(fam, x, y, w, splits, frac)
         test_nll[rid] = tn
         reference_ids.append(rid)
-        rows.append({"id": rid, "model": "smoother", "label": "非参数平滑（参照）", "family": fam.name,
-                     "group": "参照", "formula": "局部线性回归", "k": np.nan, "status": "reference",
+        rows.append({"id": rid, "model": "smoother", "label": "Local-linear smoother (reference)", "family": fam.name,
+                     "group": "reference", "formula": "local linear regression", "k": np.nan, "status": "reference",
                      "cv_rmse": float(np.sqrt(np.nanmean((y - tp) ** 2)))})
 
     table, best, recommended = rank_table(rows, test_nll, w, reference_ids)

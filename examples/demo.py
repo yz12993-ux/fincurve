@@ -46,12 +46,12 @@ if __name__ == "__main__":
         report = analyze(*args, **kw)
         elapsed = time.time() - start
         text = report.summary(show=False)
-        (OUT / f"{name}.txt").write_text(text + f"\n\n（耗时 {elapsed:.1f} 秒）\n", encoding="utf-8")
+        (OUT / f"{name}.txt").write_text(text + f"\n\n(elapsed {elapsed:.1f}s)\n", encoding="utf-8")
         report.plot(OUT / f"{name}.png")
         if "returns" in report.extras:
             report.extras["returns"].plot(OUT / f"{name}_returns.png")
         if "returns" in report.extras:
-            verdict = f"随机游走路径 → 收益率分布：{report.extras['returns'].recommended.label}"
+            verdict = f"random-walk path -> returns: {report.extras['returns'].recommended.label}"
         else:
-            verdict = f"推荐：{report.recommended.label}"
+            verdict = f"recommended: {report.recommended.label}"
         print(f"{name:28s} {elapsed:5.1f}s  {verdict}")

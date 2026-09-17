@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 
-from .additive import SHAPE_LABELS, fit_linear, prepare_features, run_additive
+from .additive import SHAPE_LABELS, fit_linear, fit_mean, prepare_features, run_additive
 from .distribution import run_distribution, sample_checks
 from .families import get_family
 from .profile import describe_relation, describe_target, random_walk_like
@@ -15,7 +15,7 @@ YEAR_SECONDS = 365.25 * 86400
 
 def analyze(X, y=None, *, family="auto", cv="auto", k_folds=5, groups=None, weights=None, trials=None,
             time_ordered=None, include=None, exclude=None, n_starts=2, nested=True, interactions=True,
-            random_state=0):
+            random_state=0, n_jobs=1):
     """Characterise how y depends on X, or which distribution X follows when y is omitted.
 
     X            1-D array/Series (one x), DataFrame (one or more features), or the sample itself if y is None
@@ -25,6 +25,9 @@ def analyze(X, y=None, *, family="auto", cv="auto", k_folds=5, groups=None, weig
     weights      observation weights; trials = number of trials behind each observed proportion
     time_ordered force (True) or forbid (False) time-series treatment; None lets the profile decide
     include / exclude   candidate keys or group names, e.g. include=["term_structure", "polynomial"]
+    nested       repeat the multi-feature shape search inside every fold (honest but slower)
+    n_jobs       worker processes: 1 runs in-process, -1 uses every core. On macOS and Windows call it
+                 from code guarded by `if __name__ == "__main__":`
     """
     if y is None:
         return analyze_distribution(X, ordered=bool(time_ordered), include=include, exclude=exclude)
@@ -39,7 +42,7 @@ def analyze(X, y=None, *, family="auto", cv="auto", k_folds=5, groups=None, weig
         arr = np.asarray(X)
         df = pd.DataFrame({"x": arr}) if arr.ndim == 1 else pd.DataFrame(arr, columns=[f"x{i + 1}" for i in range(arr.shape[1])])
     if len(df) != y.size:
-        raise ValueError(f"X 有 {len(df)} 行，y 有 {y.size} 个值")
+        raise ValueError(f"X has {len(df)} rows but y has {y.size} values")
 
     extra = {k: None if v is None else np.asarray(v).ravel() for k, v in
              {"weights": weights, "trials": trials, "groups": groups}.items()}
@@ -59,7 +62,7 @@ def analyze(X, y=None, *, family="auto", cv="auto", k_folds=5, groups=None, weig
         w = w * t
     opts = dict(family=family, cv=cv, k_folds=k_folds, groups=extra["groups"], trials=extra["trials"],
                 time_ordered=time_ordered, include=include, exclude=exclude, n_starts=n_starts,
-                random_state=random_state, dropped=dropped, y_name=y_name)
+                random_state=random_state, dropped=dropped, y_name=y_name, n_jobs=n_jobs)
 
     single = df.shape[1] == 1 and (pd.api.types.is_numeric_dtype(df.iloc[:, 0])
                                    or pd.api.types.is_datetime64_any_dtype(df.iloc[:, 0]))
@@ -71,51 +74,51 @@ def analyze(X, y=None, *, family="auto", cv="auto", k_folds=5, groups=None, weig
 # ----------------------------------------------------------------------------- decisions
 def _choose_families(family, target, y, mu_hint):
     if family != "auto":
-        return [get_family(family)], "用户指定"
+        return [get_family(family)], "set by the caller"
     kind = target["kind"]
     gaussian, lognormal = get_family("gaussian"), get_family("lognormal")
     if kind == "binary":
-        return [get_family("binomial")], "y 只有 0 和 1，用二项（伯努利）似然"
+        return [get_family("binomial")], "y takes only the values 0 and 1: Bernoulli likelihood"
     if kind == "proportion":
-        return [get_family("binomial")], "y 在 0 到 1 之间，按比例/概率处理（二项似然）"
+        return [get_family("binomial")], "y lies between 0 and 1: treated as a proportion (binomial likelihood)"
     if kind == "count":
         mu = np.clip(mu_hint, 1e-6, None)
         disp = float(np.mean((y - mu) ** 2 / mu))
         if 0.3 < disp < 3:
-            return [get_family("poisson")], f"非负整数计数，离散度 {disp:.2f} 接近 1，用 Poisson 似然"
+            return [get_family("poisson")], f"non-negative integer counts with dispersion {disp:.2f} (close to 1): Poisson likelihood"
         fams = [gaussian] + ([lognormal] if y.min() > 0 else [])
-        return fams, f"虽是整数计数，但离散度为 {disp:.1f}（Poisson 要求约为 1），改用连续误差模型"
+        return fams, f"integer counts, but dispersion is {disp:.1f} (Poisson needs about 1): continuous error models instead"
     return None, None
 
 
 def _decide_order(time_ordered, is_datetime, rel, name, y_sorted):
     if time_ordered is not None:
-        return bool(time_ordered), "用户指定"
+        return bool(time_ordered), "set by the caller"
     if is_datetime:
-        return True, "x 是日期时间"
-    if rel.get("time_like_name"):
-        return True, f"x 的名字“{name}”看起来是时间"
+        return True, "x is a datetime"
+    if rel.get("time_like_name") and not rel.get("term_like_name"):
+        return True, f"the name of x ({name!r}) looks like time"
     if rel.get("equally_spaced") and rel.get("n", 0) >= 30:
         flag, rw = random_walk_like(y_sorted)
         if flag:
-            return True, f"x 等间距，且 y 沿 x 像随机游走（相邻值相关 {rw['ar1']:.2f}，差分几乎不相关）"
-    return False, "x 不像时间变量"
+            return True, (f"x is equally spaced and y moves like a random walk along it "
+                          f"(AR(1) {rw['ar1']:.2f}, near-independent differences)")
+    return False, "x does not look like time"
 
 
 def _choose_cv(cv, n, ordered, groups):
     if cv != "auto":
-        return cv, "用户指定"
+        return cv, "set by the caller"
     if groups is not None:
-        return "group", "提供了分组标签"
+        return "group", "group labels were provided"
     if ordered:
-        return "time", "数据有时间顺序：随机打乱会用未来预测过去，分数会过于乐观"
+        return "time", "the data are ordered in time: shuffling would use the future to predict the past"
     if n < 20:
-        return "loo", f"样本只有 {n} 个，用留一法"
-    return "kfold", "数据没有时间顺序"
+        return "loo", f"only {n} observations: leave-one-out"
+    return "kfold", "no time ordering"
 
 
-def models_group(models, ranked, key):
-    """Library group of a candidate key (the ranking stores Chinese group labels, models store keys)."""
+def _group_of(models, key):
     for m in models.values():
         if m.candidate.key == key:
             return m.candidate.group
@@ -124,7 +127,7 @@ def models_group(models, ranked, key):
 
 # ----------------------------------------------------------------------------- curve mode
 def _analyze_curve(xs, y, w, *, family, cv, k_folds, groups, trials, time_ordered, include, exclude,
-                   n_starts, random_state, dropped, y_name):
+                   n_starts, random_state, dropped, y_name, n_jobs):
     x_name = str(xs.name) if xs.name is not None else "x"
     is_datetime = pd.api.types.is_datetime64_any_dtype(xs)
     t0 = xs.min() if is_datetime else None
@@ -132,7 +135,7 @@ def _analyze_curve(xs, y, w, *, family, cv, k_folds, groups, trials, time_ordere
     n = y.size
     warnings_, notes = [], []
     if dropped:
-        notes.append(f"删除了 {dropped} 行含缺失值的数据")
+        notes.append(f"dropped {dropped} rows with missing values")
 
     target = describe_target(y, trials)
     rel = describe_relation(x, y, x_name)
@@ -145,22 +148,23 @@ def _analyze_curve(xs, y, w, *, family, cv, k_folds, groups, trials, time_ordere
             hetero = rel["hetero_p"] < 0.05 and rel["hetero_rho"] > 0.15
             wide = target["max_min_ratio"] > 3
             if hetero or wide:
-                why = f"噪声随水平放大（ρ = {rel['hetero_rho']:.2f}）" if hetero else \
-                    f"最大/最小值之比为 {target['max_min_ratio']:.1f}"
+                why = (f"noise grows with the level (Spearman ρ = {rel['hetero_rho']:.2f})" if hetero
+                       else f"the max/min ratio is {target['max_min_ratio']:.1f}")
                 families = [get_family("gaussian"), get_family("lognormal")]
-                fam_reason = f"y 为正且{why}，同时比较加性误差和乘性误差"
+                fam_reason = f"y is positive and {why}: additive and multiplicative errors compete"
             else:
-                families, fam_reason = [get_family("gaussian")], "y 为正但跨度不大、噪声大致恒定，用加性误差"
+                families = [get_family("gaussian")]
+                fam_reason = "y is positive with a narrow range and constant noise: additive errors"
         else:
-            families, fam_reason = [get_family("gaussian")], "y 可正可负，用加性误差（正态）"
+            families, fam_reason = [get_family("gaussian")], "y can take either sign: additive (Gaussian) errors"
 
     ordered, order_reason = _decide_order(time_ordered, is_datetime, rel, x_name, y[order])
     strategy, cv_reason = _choose_cv(cv, n, ordered, groups)
     splits = make_splits(n, strategy, k_folds, order=order, groups=groups, seed=random_state)
-    race = run_race(x, y, w, families, splits, n_starts, include, exclude, random_state, frac=rel["frac"])
+    race = run_race(x, y, w, families, splits, n_starts, include, exclude, random_state, frac=rel["frac"], n_jobs=n_jobs)
     table, models = race["table"], race["models"]
     if race["recommended"] is None:
-        raise RuntimeError("所有候选都拟合失败")
+        raise RuntimeError("every candidate failed to fit")
     rec, best = models[race["recommended"]], models[race["best"]]
     ranked = table[table["status"] == "ok"]
 
@@ -170,73 +174,83 @@ def _analyze_curve(xs, y, w, *, family, cv, k_folds, groups, trials, time_ordere
         flag, rw = random_walk_like(y[order])
         if flag:
             base = np.log(y[order]) if rw["log_scale"] else y[order]
-            extras["returns"] = analyze_distribution(pd.Series(np.diff(base), name="对数收益率" if rw["log_scale"] else "一阶差分"),
-                                                     ordered=True)
+            name = "log return" if rw["log_scale"] else "first difference"
+            extras["returns"] = analyze_distribution(pd.Series(np.diff(base), name=name), ordered=True)
             warnings_.append(
-                f"y 看起来像价格/净值这类随机游走路径（相邻值相关 {rw['ar1']:.2f}，差分几乎不相关 {rw['diff_acf1']:+.2f}）："
-                "曲线形状只是这一条路径的偶然走势，外推没有意义。更合适的是研究"
-                + ("对数收益率" if rw["log_scale"] else "一阶差分") + "的分布，已自动附在 report.extras['returns']")
-        if order_reason != "用户指定":
-            notes.append(f"按时间处理的原因：{order_reason}")
-        notes.append("按时间滚动验证评估的是向前外推能力，比随机 K 折更严格，分数通常更差")
+                f"y looks like a price or NAV path, i.e. a random walk (AR(1) {rw['ar1']:.2f}, differences nearly "
+                f"uncorrelated {rw['diff_acf1']:+.2f}): any curve shape is an accident of this one path and must not be "
+                f"extrapolated. Study the distribution of the {name}s instead — attached as report.extras['returns']")
+        if order_reason != "set by the caller":
+            notes.append(f"treated as a time series because {order_reason}")
+        notes.append("rolling-origin validation measures forward prediction, which is stricter than shuffled K-fold")
 
-    # --- ties, extrapolation, reference
+    # --- ties, extrapolation, context, reference
     ties = ranked[ranked["tie"]]
     multi = len(families) > 1
-    names = [f"{row.label}［{FAMILY_SHORT[row.family]}］" if multi else row.label for row in ties.itertuples()]
+    names = [f"{row.label} [{FAMILY_SHORT[row.family]}]" if multi else row.label for row in ties.itertuples()]
     if len(ties) > 1:
-        notes.append(f"与最优模型没有实质差距的共有 {len(ties)} 个：" + "、".join(names[:8]))
+        notes.append(f"{len(ties)} models are practically tied with the best: " + ", ".join(names[:8]))
         if ties["group"].nunique() > 1:
-            warnings_.append("并列模型分属不同类型（" + "、".join(ties["group"].unique()[:6]) +
-                             "）：数据本身区分不了这些含义不同的形状，要结合经济含义选择，或补充 x 范围更宽的数据")
+            warnings_.append("the tied models belong to different families (" + ", ".join(ties["group"].unique()[:6]) +
+                             "): the data cannot tell these shapes apart — choose on economic grounds or collect "
+                             "a wider x range")
         spread = extrapolation_spread([models[i] for i in ties["id"].head(6)], x, y)
         if spread > 0.5:
-            size = f"{spread:.0f} 倍" if spread >= 10 else f"{spread:.0%}"
-            warnings_.append(f"这些并列模型在数据范围之外分歧很大（向外延伸 25% 的区间里，最大差距达到 y 全距的 {size}）：不要外推")
+            size = f"{spread:.0f}×" if spread >= 10 else f"{spread:.0%}"
+            warnings_.append(f"the tied models disagree strongly outside the data (within 25% beyond the observed "
+                             f"range the largest gap is {size} of y's range): do not extrapolate")
+    context = rel.get("context")
+    if context:
+        label, context_groups = context
+        themed = ranked[ranked["model"].map(lambda k: _group_of(models, k) in context_groups)]
+        if not themed.empty and rec.candidate.group not in context_groups:
+            row = themed.iloc[0]
+            pos = int(ranked.index.get_loc(themed.index[0])) + 1
+            status = ("practically tied with the best" if row["tie"]
+                      else f"{row['d_cv']:.3g} ± {row['se']:.2g} behind the best")
+            notes.append(f"the name of x suggests a {label}: the specialised form '{row['label']}' ranks #{pos} "
+                         f"({status}). Its parameters have a direct economic meaning, so prefer it when the gap is small")
+        elif rec.candidate.group in context_groups:
+            notes.append(f"the name of x suggests a {label}, and the recommended model is that context's specialised form")
     for rid in race["reference_ids"]:
         ref = table.set_index("id").loc[rid]
         if np.isfinite(ref["d_cv"]) and ref["d_cv"] < 0 and abs(ref["d_cv"]) > 2 * (ref["se"] or 0):
-            warnings_.append(f"非参数平滑比所有候选都好（ΔCV-NLL = {ref['d_cv']:.3g}）：候选库里可能缺少真实形状，请看残差图找规律")
-    context = rel.get("context")
-    if context:
-        label, groups_ = context
-        themed = ranked[ranked["model"].map(lambda k: models_group(models, ranked, k) in groups_)]
-        if not themed.empty and rec.candidate.group not in groups_:
-            row = themed.iloc[0]
-            pos = int(ranked.index.get_loc(themed.index[0])) + 1
-            status = "与最优没有实质差距" if row["tie"] else f"比最优差 {row['d_cv']:.3g} ± {row['se']:.2g}"
-            notes.append(f"x 的名字提示这是{label}：该语境的专用形式“{row['label']}”排第 {pos}（{status}）。"
-                         "专用形式的参数有明确经济含义，差距不大时可以优先使用")
-        elif rec.candidate.group in groups_:
-            notes.append(f"x 的名字提示这是{label}，推荐模型正好是该语境的专用形式")
+            warnings_.append(f"the non-parametric smoother beats every candidate (ΔCV-NLL = {ref['d_cv']:.3g}): the "
+                             "library may be missing the true shape — inspect the residual plot")
     shape = rel["shape"]
-    for label, m in (("推荐模型", rec), ("得分最高的模型", best)):
+    for label, m in (("the recommended model", rec), ("the best-scoring model", best)):
         c = m.candidate
         if "peak" in c.tags and c.group not in ("polynomial", "term_structure") and shape in ("increasing", "decreasing"):
-            warnings_.append(f"{label}“{c.label}”是峰形函数，但数据在观测范围内是单调的：它可能只是在用峰的半边近似 S 形或饱和形状，"
-                             "峰的位置没有数据支撑")
+            warnings_.append(f"{label} ('{c.label}') is a peak shape, but the data are monotone over the observed range: "
+                             "it is probably using half a peak to mimic a sigmoid or saturation, so the peak location "
+                             "is unsupported")
             break
 
     # --- residuals and data quality
     checks = residual_checks(rec, x, y)
     if not ordered and n >= 20 and checks["resid_lag1"] > 0.5:
-        warnings_.append(f"推荐模型的残差沿 x 高度自相关（lag-1 = {checks['resid_lag1']:.2f}）：要么漏掉了形状，要么数据其实是"
-                         "时间序列（随机 K 折会偏乐观，此时请传 time_ordered=True）")
+        warnings_.append(f"the recommended model's residuals are strongly autocorrelated along x (lag-1 = "
+                         f"{checks['resid_lag1']:.2f}): either a shape is missing or the data are a time series "
+                         "(then pass time_ordered=True, because shuffled K-fold is optimistic)")
     elif not ordered and n >= 20 and checks["resid_lag1"] > 0.3:
-        warnings_.append(f"推荐模型的残差沿 x 仍有结构（lag-1 = {checks['resid_lag1']:.2f}）：可能漏掉了某种形状")
+        warnings_.append(f"the recommended model's residuals still show structure along x (lag-1 = "
+                         f"{checks['resid_lag1']:.2f}): a shape may be missing")
     if (rec.family.name == "gaussian" and checks.get("hetero_p", 1) < 0.01 and checks.get("hetero_rho", 0) > 0.2
             and len(families) == 1 and y.min() > 0):
-        notes.append("残差随预测值增大而增大：可以试 family='lognormal'（乘性误差）")
+        notes.append("residuals grow with the fitted value: try family='lognormal' (multiplicative errors)")
     if rel["n_outliers"] or rel["resid_excess_kurtosis"] > 3:
-        warnings_.append(f"残差有厚尾或离群点（{rel['n_outliers']} 个超过 5 倍 MAD）：最小二乘会被少数点拉动，建议检查这些点")
+        warnings_.append(f"heavy-tailed residuals or outliers ({rel['n_outliers']} beyond 5 MADs): least squares can be "
+                         "pulled by a few points — check them")
     if rel["max_gap_share"] > 0.3:
-        notes.append(f"x 有大段空白（最大间隔占全距 {rel['max_gap_share']:.0%}）：空白区间里的形状没有数据支撑")
+        notes.append(f"x has a large gap (the widest spans {rel['max_gap_share']:.0%} of its range): the shape inside "
+                     "the gap is unsupported")
     if n < 15:
-        warnings_.append(f"样本只有 {n} 个：排名很不稳定，只作参考")
+        warnings_.append(f"only {n} observations: the ranking is unstable, treat it as indicative")
     if target["kind"] == "proportion" and trials is None:
-        notes.append("没有提供每个比例背后的样本数（trials），各点等权；提供后似然更准确")
+        notes.append("no trial counts were given for the proportions, so all points get equal weight; pass trials= "
+                     "for a proper likelihood")
     if race["skipped"]:
-        notes.append("因定义域或样本量跳过的候选：" + "、".join(race["skipped"]))
+        notes.append("candidates skipped because of their domain or the sample size: " + ", ".join(race["skipped"]))
 
     term_axis = bool(x.min() >= 0 and (rel["term_like_name"] or "term_axis" in rec.candidate.tags))
     profile = {"n": n, "target": target, "relation": {k: v for k, v in rel.items() if not k.startswith("_")},
@@ -251,88 +265,93 @@ def _analyze_curve(xs, y, w, *, family, cv, k_folds, groups, trials, time_ordere
 
 # ----------------------------------------------------------------------------- additive mode
 def _analyze_additive(df, y, w, *, family, cv, k_folds, groups, trials, time_ordered, include, exclude,
-                      n_starts, random_state, dropped, y_name, nested, interactions):
+                      n_starts, random_state, dropped, y_name, nested, interactions, n_jobs):
     n = y.size
     warnings_, notes = [], []
     if dropped:
-        notes.append(f"删除了 {dropped} 行含缺失值的数据")
+        notes.append(f"dropped {dropped} rows with missing values")
     feats = prepare_features(df)
     usable = [f for f in feats if f.kind != "excluded"]
     if not usable:
-        raise ValueError("没有可用的特征：" + "；".join(f"{f.name}（{f.note}）" for f in feats))
+        raise ValueError("no usable features: " + "; ".join(f"{f.name} ({f.note})" for f in feats))
     target = describe_target(y, trials)
     idx = np.arange(n)
 
     families, fam_reason = None, None
     if family == "auto" and target["kind"] == "count":
-        design, theta, _ = fit_linear(usable, get_family("poisson"), idx, y, w)
-        mu_hint = get_family("poisson").clip(design.mean_fn(idx, *theta))
-        families, fam_reason = _choose_families(family, target, y, mu_hint)
+        fit, _ = fit_linear(usable, get_family("poisson"), idx, y, w)
+        families, fam_reason = _choose_families(family, target, y, get_family("poisson").clip(fit_mean(fit, idx)))
     elif family != "auto" or target["kind"] in ("binary", "proportion"):
         families, fam_reason = _choose_families(family, target, y, None)
     if families is None or len(families) > 1:
         if y.min() > 0:
-            aics = {name: fit_linear(usable, get_family(name), idx, y, w)[2] for name in ("gaussian", "lognormal")}
+            aics = {name: fit_linear(usable, get_family(name), idx, y, w)[1] for name in ("gaussian", "lognormal")}
             pick = min(aics, key=aics.get)
             families = [get_family(pick)]
             gap = abs(aics["gaussian"] - aics["lognormal"])
-            fam_reason = (fam_reason + "；" if fam_reason else "") + \
-                f"y 为正：线性基准下{families[0].label}的 AIC 低 {gap:.1f}，因此选用它"
+            fam_reason = ((fam_reason + "; ") if fam_reason else "") + \
+                f"y is positive: with all-linear terms, {families[0].label} has an AIC {gap:.1f} lower, so it is used"
         else:
-            families, fam_reason = [get_family("gaussian")], "y 可正可负，用加性误差（正态）"
+            families, fam_reason = [get_family("gaussian")], "y can take either sign: additive (Gaussian) errors"
     fam = families[0]
 
     time_feats = [f for f in usable if f.is_time]
     ordered = bool(time_ordered) if time_ordered is not None else bool(time_feats)
-    order_reason = "用户指定" if time_ordered is not None else (f"特征“{time_feats[0].name}”是日期时间" if time_feats else "")
+    if time_ordered is not None:
+        order_reason = "set by the caller"
+    else:
+        order_reason = f"feature {time_feats[0].name!r} is a datetime" if time_feats else ""
     strategy, cv_reason = _choose_cv(cv, n, ordered, groups)
     order = np.argsort(time_feats[0].raw, kind="stable") if time_feats else None
     splits = make_splits(n, strategy, k_folds, order=order, groups=groups, seed=random_state)
 
-    res = run_additive(feats, fam, y, w, splits, nested=nested, interactions=interactions)
-    table, models = res["table"], res["models"]
+    res = run_additive(feats, fam, y, w, splits, nested=nested, interactions=interactions, n_jobs=n_jobs)
+    table = res["table"]
 
     for f in feats:
         if f.kind == "excluded":
-            warnings_.append(f"特征“{f.name}”已剔除：{f.note}")
+            warnings_.append(f"feature {f.name!r} was removed: {f.note}")
     numeric = [f for f in usable if f.kind == "numeric"]
     if len(numeric) >= 2:
-        Z = np.column_stack([f.z for f in numeric])
-        C = np.corrcoef(Z, rowvar=False)
+        C = np.corrcoef(np.column_stack([f.z for f in numeric]), rowvar=False)
         for i in range(len(numeric)):
             for j in range(i + 1, len(numeric)):
                 if abs(C[i, j]) > 0.9:
-                    warnings_.append(f"“{numeric[i].name}”和“{numeric[j].name}”高度相关（r = {C[i, j]:.2f}）："
-                                     "两者的形状和重要性怎么分配并不稳定")
+                    warnings_.append(f"{numeric[i].name!r} and {numeric[j].name!r} are highly correlated "
+                                     f"(r = {C[i, j]:.2f}): how shape and importance are split between them is unstable")
     feat_table = res["features"]
     if "stability" in feat_table:
         for row in feat_table.itertuples():
             stab = getattr(row, "stability", np.nan)
             full_shape = res["full_shapes"].get(row.feature)
             if full_shape and full_shape != "linear" and np.isfinite(stab) and stab < 0.9:
-                warnings_.append(f"“{row.feature}”的非线性形状在各折之间不一致（效应曲线平均相关 {stab:.2f}）："
-                                 "这条曲线的细节可能是噪声造成的")
+                warnings_.append(f"the nonlinear shape of {row.feature!r} is not consistent across folds (mean "
+                                 f"effect-curve correlation {stab:.2f}): its details may be noise")
     ref = table.set_index("id")
     if "knn" in ref.index and np.isfinite(ref.loc["knn", "d_cv"]) and ref.loc["knn", "d_cv"] < 0 \
             and abs(ref.loc["knn", "d_cv"]) > 2 * (ref.loc["knn", "se"] or 0):
-        warnings_.append("K 近邻参照明显更好：可能存在加性结构表达不了的交互作用或局部模式")
+        warnings_.append("the k-nearest-neighbour reference is clearly better: there may be interactions or local "
+                         "structure the additive model cannot express")
     rec_row = ref.loc[res["recommended"]]
     if rec_row["k"] > n / 10:
-        warnings_.append(f"推荐模型有 {int(rec_row['k'])} 个参数，而样本只有 {n} 个：容易过拟合")
+        warnings_.append(f"the recommended model has {int(rec_row['k'])} parameters for {n} observations: "
+                         "risk of overfitting")
     for h in res["history"]:
-        notes.append(f"“{h['feature']}”：{SHAPE_LABELS[h['from']]} → {SHAPE_LABELS[h['to']]}（全样本 AIC 下降 {h['aic_gain']:.1f}）")
+        notes.append(f"{h['feature']!r}: {SHAPE_LABELS[h['from']]} → {SHAPE_LABELS[h['to']]} "
+                     f"(full-sample AIC −{h['aic_gain']:.1f})")
     for it in res["interactions"]:
-        notes.append(f"加入交互项 {it['pair'][0]} × {it['pair'][1]}（AIC 下降 {it['aic_gain']:.1f}）")
+        notes.append(f"added interaction {it['pair'][0]} × {it['pair'][1]} (AIC −{it['aic_gain']:.1f})")
     if ordered and order_reason:
-        notes.append(f"按时间处理的原因：{order_reason}")
+        notes.append(f"treated as a time series because {order_reason}")
 
-    kinds = {"数值特征": sum(f.kind == "numeric" for f in feats), "二元特征": sum(f.kind == "binary" for f in feats),
-             "类别特征": sum(f.kind == "categorical" for f in feats), "剔除的特征": sum(f.kind == "excluded" for f in feats)}
+    kinds = {"numeric": sum(f.kind == "numeric" for f in feats), "binary": sum(f.kind == "binary" for f in feats),
+             "categorical": sum(f.kind == "categorical" for f in feats),
+             "removed": sum(f.kind == "excluded" for f in feats)}
     profile = {"n": n, "target": target, "feature_kinds": kinds}
     decisions = {"families": families, "family_reason": fam_reason, "cv": strategy, "cv_reason": cv_reason,
                  "n_splits": len(splits), "ordered": ordered}
     data = {"X": df, "y": y, "w": w, "columns": list(df.columns), "y_name": y_name}
-    return Report("additive", data, profile, decisions, table, models, res["best"], res["recommended"],
+    return Report("additive", data, profile, decisions, table, res["models"], res["best"], res["recommended"],
                   warnings_, notes, {"additive": res})
 
 
@@ -347,28 +366,32 @@ def analyze_distribution(sample, ordered=False, include=None, exclude=None):
     table = res["table"]
     warnings_, notes = [], []
     if dropped:
-        notes.append(f"删除了 {dropped} 个缺失/无穷值")
+        notes.append(f"dropped {dropped} missing or infinite values")
     if checks.get("looks_like_levels"):
-        warnings_.append(f"相邻值高度相关（lag-1 = {checks['acf1']:.2f}），像价格水平而不是收益率："
-                         "分布拟合通常应针对收益率，例如 np.diff(np.log(price))")
+        warnings_.append(f"neighbouring values are highly correlated (lag-1 = {checks['acf1']:.2f}): these look like "
+                         "price levels, not returns — fit distributions to returns, e.g. np.diff(np.log(price))")
     if checks.get("lb_sq_p", 1) < 0.01:
-        warnings_.append(f"平方序列显著自相关（Ljung–Box p = {checks['lb_sq_p']:.1e}）：存在波动聚集，独立同分布不成立。"
-                         "这里拟合的是无条件分布；明天的 VaR 这类条件风险应使用 GARCH 类模型")
+        warnings_.append(f"squared values are significantly autocorrelated (Ljung–Box p = {checks['lb_sq_p']:.1e}): "
+                         "volatility clusters, so the draws are not independent. This is the unconditional distribution; "
+                         "for conditional risk such as tomorrow's VaR use a GARCH-type model")
     if checks.get("lb_p", 1) < 0.01 and not checks.get("looks_like_levels"):
-        notes.append(f"序列本身有自相关（Ljung–Box p = {checks['lb_p']:.1e}）")
+        notes.append(f"the series itself is autocorrelated (Ljung–Box p = {checks['lb_p']:.1e})")
     rec_row = table.set_index("id").loc[res["recommended"]]
     worst = max(abs(rec_row["q01_err"]), abs(rec_row["q99_err"]))
     if worst > 0.15:
         thin = min(rec_row["q01_err"], rec_row["q99_err"]) < -0.15
-        warnings_.append(f"推荐分布的尾部偏差较大（左尾 {rec_row['q01_err']:+.0%}，右尾 {rec_row['q99_err']:+.0%}）："
-                         + ("尾部偏薄，会低估 VaR 这类尾部风险" if thin else "尾部偏厚，尾部风险估计偏保守"))
+        warnings_.append(f"the recommended distribution misses the tails (left {rec_row['q01_err']:+.0%}, right "
+                         f"{rec_row['q99_err']:+.0%}): "
+                         + ("tails too thin, so VaR-type risk will be understated" if thin
+                            else "tails too fat, so tail risk will be overstated"))
     t = table.set_index("id")
     if "normal" in t.index and checks["excess_kurtosis"] > 1 and np.isfinite(t.loc["normal", "d_aic"]):
-        notes.append(f"超额峰度 {checks['excess_kurtosis']:.1f}：正态分布比最优分布差 ΔAIC = {t.loc['normal', 'd_aic']:.0f}，尾部明显更厚")
+        notes.append(f"excess kurtosis {checks['excess_kurtosis']:.1f}: the normal distribution is "
+                     f"ΔAIC = {t.loc['normal', 'd_aic']:.0f} behind the best — the tails are clearly heavier")
     if y.size < 200:
-        notes.append("样本少于 200 个：1% 尾部分位数主要由少数几个点决定，尾部误差仅供参考")
+        notes.append("fewer than 200 observations: the 1% quantiles rest on a handful of points, so tail errors are "
+                     "indicative only")
     profile = {"n": int(y.size), **checks}
     data = {"y": y, "y_name": name}
-    decisions = {"criterion": "AIC"}
-    return Report("distribution", data, profile, decisions, table, res["models"], res["best"], res["recommended"],
-                  warnings_, notes, {})
+    return Report("distribution", data, profile, {"criterion": "AIC"}, table, res["models"], res["best"],
+                  res["recommended"], warnings_, notes, {})
